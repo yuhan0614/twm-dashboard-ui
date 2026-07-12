@@ -130,6 +130,9 @@
 const API_BASE = 'https://twm-api-xa53.onrender.com';
 const ACCOUNT_ID = '1558628995676725';
 let trendChart, pieChart;
+let lastFilteredTrend = [];
+let lastTotal = null;
+let dateGranularity = 'day';
 
 function toYMD(d) {
   const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
@@ -263,54 +266,26 @@ function renderPerf(camps, trend, since, until) {
     </div>
     <div class="table-card">
       <div class="table-header">
-        <h3>🎯 廣告活動成效</h3>
-        <span style="font-size:12px;color:#aaa;">${camps.length} 個廣告活動</span>
+        <h3>📅 日期成效</h3>
+        <div class="table-header-right">
+          <div class="preset-btns">
+            <button class="preset-btn ${dateGranularity==='day'?'active':''}" onclick="setGranularity('day')">日</button>
+            <button class="preset-btn ${dateGranularity==='week'?'active':''}" onclick="setGranularity('week')">週</button>
+            <button class="preset-btn ${dateGranularity==='month'?'active':''}" onclick="setGranularity('month')">月</button>
+          </div>
+        </div>
       </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
-            <th>廣告活動</th><th>花費</th><th>佔比</th><th>曝光</th><th>CTR</th>
-            <th>連結點擊</th><th>CPLC</th><th>CPM</th><th>Apply<br>頁面</th><th>購買</th><th>CPA</th>
-            ${PRODUCT_FIELDS.map(p=>`<th>${p.label}</th>`).join('')}
-          </tr></thead>
-          <tbody>${sorted.map(r => {
-            const pct = total.spend > 0 ? (r.spend/total.spend*100).toFixed(1) : '0';
-            const bw = Math.round((r.spend||0)/maxSpend*80);
-            const rCpm = r.impressions ? r.spend/r.impressions*1000 : 0;
-            return `<tr>
-              <td><span class="cell-name" title="${r.campaign_name}">${r.campaign_name}</span></td>
-              <td>${fmtM(r.spend)}</td>
-              <td><div class="spend-bar-wrap"><span style="font-size:11px;color:#888">${pct}%</span><div class="spend-bar" style="width:${bw}px"></div></div></td>
-              <td>${fmtN(r.impressions)}</td><td>${fmtP(r.ctr)}</td>
-              <td>${fmtN(r.link_clicks)}</td><td>${fmtM(r.cplc)}</td><td>${fmtM(rCpm)}</td>
-              <td>${fmtN(r.view_content)}</td><td>${fmtN(r.purchase)}</td>
-              <td>${fmtM(r.cpa)}</td>
-              ${PRODUCT_FIELDS.map(p=>`<td>${fmtN(r[p.key])}</td>`).join('')}
-            </tr>`;
-          }).join('')}
-          <tr style="background:#f0f4ff;font-weight:700;border-top:2px solid #d0d9f0;">
-            <td>合計</td>
-            <td>${fmtM(total.spend)}</td>
-            <td></td>
-            <td>${fmtN(total.impressions)}</td>
-            <td>${fmtP(total.link_clicks && total.impressions ? total.link_clicks/total.impressions*100 : 0)}</td>
-            <td>${fmtN(total.link_clicks)}</td>
-            <td>${fmtM(cplc)}</td>
-            <td>${fmtM(cpm)}</td>
-            <td>${fmtN(total.view_content)}</td>
-            <td>${fmtN(total.purchase)}</td>
-            <td>${fmtM(cpa)}</td>
-            ${PRODUCT_FIELDS.map(p=>`<td>${fmtN(total[p.key])}</td>`).join('')}
-          </tr>
-          </tbody>
-        </table>
-      </div>
+      <div class="table-wrap" id="dateTableWrap"></div>
     </div>`;
+
+  lastFilteredTrend = trend.filter(r => r.date_start >= since && r.date_start <= until);
+  lastTotal = total;
+  renderDateTable();
 
   if (trendChart) trendChart.destroy();
   if (pieChart)   pieChart.destroy();
 
-  const filteredTrend = trend.filter(r => r.date_start >= since && r.date_start <= until);
+  const filteredTrend = lastFilteredTrend;
   const tDates = filteredTrend.map(r => r.date_start);
   trendChart = new Chart(document.getElementById('trendChart'), {
     data: { labels: tDates, datasets: [
@@ -332,6 +307,102 @@ function renderPerf(camps, trend, since, until) {
     data: { labels: sorted.map(r=>r.campaign_name.slice(0,16)), datasets:[{data:sorted.map(r=>r.spend),backgroundColor:PIE_COLORS,borderWidth:2,borderColor:'white'}] },
     options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'right',labels:{font:{size:10},boxWidth:10,padding:6}}} }
   });
+}
+
+function aggregateByPeriod(rows, granularity) {
+  if (granularity === 'day') {
+    return [...rows].sort((a,b)=>a.date_start<b.date_start?-1:1).map(r => ({ ...r, label: r.date_start }));
+  }
+  const map = {};
+  for (const r of rows) {
+    const d = new Date(r.date_start + 'T00:00:00');
+    let key, label;
+    if (granularity === 'week') {
+      const day = d.getDay();
+      const monday = new Date(d); monday.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+      const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+      key = toYMD(monday);
+      label = `${toYMD(monday).slice(5)} ~ ${toYMD(sunday).slice(5)}`;
+    } else {
+      key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      label = key;
+    }
+    if (!map[key]) map[key] = { label, date_start: key, spend:0, impressions:0, link_clicks:0, view_content:0, purchase:0,
+      netflix_purchase:0, max_purchase:0, newdp_purchase:0, prime_purchase:0, ott_purchase:0 };
+    const g = map[key];
+    g.spend            += r.spend            || 0;
+    g.impressions       += r.impressions       || 0;
+    g.link_clicks       += r.link_clicks       || 0;
+    g.view_content       += r.view_content       || 0;
+    g.purchase          += r.purchase          || 0;
+    g.netflix_purchase  += r.netflix_purchase  || 0;
+    g.max_purchase      += r.max_purchase      || 0;
+    g.newdp_purchase    += r.newdp_purchase    || 0;
+    g.prime_purchase    += r.prime_purchase    || 0;
+    g.ott_purchase      += r.ott_purchase      || 0;
+  }
+  return Object.keys(map).sort().map(k => {
+    const g = map[k];
+    return { ...g,
+      ctr:  g.impressions > 0 ? g.link_clicks / g.impressions * 100 : 0,
+      cplc: g.link_clicks > 0 ? g.spend / g.link_clicks : 0,
+      cpm:  g.impressions > 0 ? g.spend / g.impressions * 1000 : 0,
+      cpa:  g.purchase > 0 ? g.spend / g.purchase : 0,
+    };
+  });
+}
+
+function setGranularity(g) {
+  dateGranularity = g;
+  document.querySelectorAll('.table-header-right .preset-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  renderDateTable();
+}
+
+function renderDateTable() {
+  const wrap = document.getElementById('dateTableWrap');
+  if (!wrap || !lastTotal) return;
+  const total = lastTotal;
+  const periods = aggregateByPeriod(lastFilteredTrend, dateGranularity);
+  const maxSpend = Math.max(...periods.map(r=>r.spend||0), 1);
+
+  wrap.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>日期</th><th>花費</th><th>佔比</th><th>曝光</th><th>CTR</th>
+        <th>連結點擊</th><th>CPLC</th><th>CPM</th><th>Apply<br>頁面</th><th>購買</th><th>CPA</th>
+        ${PRODUCT_FIELDS.map(p=>`<th>${p.label}</th>`).join('')}
+      </tr></thead>
+      <tbody>${periods.map(r => {
+        const pct = total.spend > 0 ? (r.spend/total.spend*100).toFixed(1) : '0';
+        const bw = Math.round((r.spend||0)/maxSpend*80);
+        return `<tr>
+          <td><span class="cell-name">${r.label}</span></td>
+          <td>${fmtM(r.spend)}</td>
+          <td><div class="spend-bar-wrap"><span style="font-size:11px;color:#888">${pct}%</span><div class="spend-bar" style="width:${bw}px"></div></div></td>
+          <td>${fmtN(r.impressions)}</td><td>${fmtP(r.ctr)}</td>
+          <td>${fmtN(r.link_clicks)}</td><td>${fmtM(r.cplc)}</td><td>${fmtM(r.cpm)}</td>
+          <td>${fmtN(r.view_content)}</td><td>${fmtN(r.purchase)}</td>
+          <td>${fmtM(r.cpa)}</td>
+          ${PRODUCT_FIELDS.map(p=>`<td>${fmtN(r[p.key])}</td>`).join('')}
+        </tr>`;
+      }).join('')}
+      <tr style="background:#f0f4ff;font-weight:700;border-top:2px solid #d0d9f0;">
+        <td>合計</td>
+        <td>${fmtM(total.spend)}</td>
+        <td></td>
+        <td>${fmtN(total.impressions)}</td>
+        <td>${fmtP(total.link_clicks && total.impressions ? total.link_clicks/total.impressions*100 : 0)}</td>
+        <td>${fmtN(total.link_clicks)}</td>
+        <td>${fmtM(total.link_clicks ? total.spend/total.link_clicks : 0)}</td>
+        <td>${fmtM(total.impressions ? total.spend/total.impressions*1000 : 0)}</td>
+        <td>${fmtN(total.view_content)}</td>
+        <td>${fmtN(total.purchase)}</td>
+        <td>${fmtM(total.purchase ? total.spend/total.purchase : 0)}</td>
+        ${PRODUCT_FIELDS.map(p=>`<td>${fmtN(total[p.key])}</td>`).join('')}
+      </tr>
+      </tbody>
+    </table>`;
 }
 
 </script>
