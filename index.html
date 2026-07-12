@@ -32,14 +32,7 @@
   .status-text.ok { color: #52c41a; }
   .status-text.err { color: #f5222d; }
 
-  .tabs { background: white; border-bottom: 1px solid #e4e6ea; padding: 0 24px; display: flex; gap: 0; }
-  .tab-btn { padding: 13px 20px; font-size: 14px; font-weight: 500; color: #888; border: none; background: none; cursor: pointer; border-bottom: 3px solid transparent; transition: all 0.15s; }
-  .tab-btn:hover { color: #1677ff; }
-  .tab-btn.active { color: #1677ff; border-bottom-color: #1677ff; font-weight: 600; }
-
   .main { padding: 20px 24px; max-width: 1500px; margin: 0 auto; }
-  .tab-panel { display: none; }
-  .tab-panel.active { display: block; }
 
   .loading-overlay { display: none; position: fixed; inset: 0; background: rgba(255,255,255,0.75); z-index: 100; align-items: center; justify-content: center; flex-direction: column; gap: 12px; }
   .loading-overlay.show { display: flex; }
@@ -69,11 +62,8 @@
   .table-header-right { display: flex; align-items: center; gap: 10px; }
   .table-wrap { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; }
-  th { background: #f7f8fa; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: #65676b; padding: 10px 14px; text-align: right; white-space: nowrap; border-bottom: 1px solid #e4e6ea; cursor: pointer; user-select: none; }
-  th:first-child { text-align: left; cursor: default; }
-  th.sortable:hover { color: #1677ff; background: #e6f4ff; }
-  th.sort-asc::after { content: ' ↑'; }
-  th.sort-desc::after { content: ' ↓'; }
+  th { background: #f7f8fa; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: #65676b; padding: 16px 10px; text-align: right; white-space: normal; line-height: 1.4; vertical-align: bottom; min-width: 80px; border-bottom: 1px solid #e4e6ea; }
+  th:first-child { text-align: left; min-width: 200px; }
   td { padding: 10px 14px; text-align: right; border-bottom: 1px solid #f5f5f5; font-size: 13px; white-space: nowrap; }
   td:first-child { text-align: left; }
   tr:last-child td { border-bottom: none; }
@@ -82,19 +72,11 @@
   .spend-bar-wrap { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
   .spend-bar { height: 5px; border-radius: 3px; background: #1677ff; opacity: 0.55; min-width: 2px; }
   .cell-name { font-weight: 600; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
-  .cell-sub { font-size: 11px; color: #aaa; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
 
   th:first-child, td:first-child { position: sticky; left: 0; z-index: 2; background: inherit; }
   th:first-child { background: #f7f8fa; z-index: 3; }
   td:first-child { background: white; }
   tr:hover td:first-child { background: #e6f4ff; }
-
-  .filter-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .filter-select { padding: 5px 10px; border: 1.5px solid #e4e6ea; border-radius: 8px; font-size: 12px; outline: none; color: #333; }
-  .filter-select:focus { border-color: #1677ff; }
-  .search-input { padding: 5px 12px; border: 1.5px solid #e4e6ea; border-radius: 8px; font-size: 12px; outline: none; width: 180px; }
-  .search-input:focus { border-color: #1677ff; }
-  .count-badge { font-size: 12px; color: #aaa; }
 </style>
 </head>
 <body>
@@ -133,21 +115,13 @@
   <span class="status-text" id="statusText"></span>
 </div>
 
-<div class="tabs">
-  <button class="tab-btn active" onclick="switchTab('perf', this)">📊 Meta 成效</button>
-  <button class="tab-btn" onclick="switchTab('creative', this)">🎨 Meta 素材</button>
-</div>
-
 <div class="loading-overlay" id="loadingOverlay">
   <div class="spinner"></div>
   <span style="color:#555;font-size:14px;">正在從 Meta API 抓取資料…</span>
 </div>
 
 <div class="main">
-  <div class="tab-panel active" id="tab-perf">
-    <div style="text-align:center;padding:60px;color:#aaa;">點擊「更新資料」開始載入</div>
-  </div>
-  <div class="tab-panel" id="tab-creative">
+  <div id="tab-perf">
     <div style="text-align:center;padding:60px;color:#aaa;">點擊「更新資料」開始載入</div>
   </div>
 </div>
@@ -156,9 +130,6 @@
 const API_BASE = 'https://twm-api-xa53.onrender.com';
 const ACCOUNT_ID = '1558628995676725';
 let trendChart, pieChart;
-let allAdData = [];
-let adUrlMap = {};
-let sortKey = '', sortDir = -1;
 
 function toYMD(d) {
   const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
@@ -195,13 +166,6 @@ function applyPresetMonth() {
   fetchData(false);
 })();
 
-function switchTab(name, btn) {
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  btn.classList.add('active');
-  document.getElementById('tab-' + name).classList.add('active');
-}
-
 async function fetchData(force = false) {
   const since = document.getElementById('dateFrom').value;
   const until = document.getElementById('dateTo').value;
@@ -213,26 +177,20 @@ async function fetchData(force = false) {
 
   try {
     const f = force ? '&force=true' : '';
-    const [campRes, trendRes, adRes, urlRes] = await Promise.all([
+    const [campRes, trendRes] = await Promise.all([
       fetch(`${API_BASE}/api/insights?accounts=${ACCOUNT_ID}&since=${since}&until=${until}&level=campaign${f}`),
       fetch(`${API_BASE}/api/insights?accounts=${ACCOUNT_ID}&since=${since}&until=${until}&level=account&time_increment=daily${f}`),
-      fetch(`${API_BASE}/api/insights?accounts=${ACCOUNT_ID}&since=${since}&until=${until}&level=ad${f}`),
-      fetch(`${API_BASE}/api/ad_urls?account=${ACCOUNT_ID}`),
     ]);
     const campJson  = await campRes.json();
     const trendJson = await trendRes.json();
-    const adJson    = await adRes.json();
     const campData  = campJson.data || [];
     const trendData = trendJson.data || [];
-    allAdData       = adJson.data || [];
-    adUrlMap        = (await urlRes.json()).data || {};
 
     renderPerf(campData, trendData, since, until);
-    renderCreative();
 
     const updatedAt = campJson.updated || new Date().toLocaleString('zh-TW');
     document.getElementById('lastUpdate').textContent = updatedAt + (campJson.cached ? '（快取）' : '');
-    status.textContent = `✓ 完成・${campData.length} campaigns・${allAdData.length} 素材`;
+    status.textContent = `✓ 完成・${campData.length} campaigns`;
     status.className = 'status-text ok';
   } catch(e) {
     status.textContent = `❌ ${e.message}`; status.className = 'status-text err';
@@ -247,11 +205,11 @@ function fmtM(n) { if (!n && n !== 0) return '<span class="na">—</span>'; retu
 function fmtP(n) { if (n == null) return '<span class="na">—</span>'; return (+n).toFixed(2)+'%'; }
 
 const PRODUCT_FIELDS = [
-  { key: 'netflix_purchase', label: 'Netflix_Purchase' },
-  { key: 'max_purchase',     label: 'Max_Purchase' },
-  { key: 'newdp_purchase',   label: 'NewDP_Purchase' },
-  { key: 'prime_purchase',   label: 'Prime_Purchase' },
-  { key: 'ott_purchase',     label: 'OTT_Purchase' },
+  { key: 'netflix_purchase', label: 'Netflix<br>Purchase' },
+  { key: 'max_purchase',     label: 'Max<br>Purchase' },
+  { key: 'newdp_purchase',   label: 'NewDP<br>Purchase' },
+  { key: 'prime_purchase',   label: 'Prime<br>Purchase' },
+  { key: 'ott_purchase',     label: 'OTT<br>Purchase' },
 ];
 
 function renderPerf(camps, trend, since, until) {
@@ -312,7 +270,7 @@ function renderPerf(camps, trend, since, until) {
         <table>
           <thead><tr>
             <th>廣告活動</th><th>花費</th><th>佔比</th><th>曝光</th><th>CTR</th>
-            <th>連結點擊</th><th>CPLC</th><th>CPM</th><th>Apply頁面</th><th>購買</th><th>CPA</th>
+            <th>連結點擊</th><th>CPLC</th><th>CPM</th><th>Apply<br>頁面</th><th>購買</th><th>CPA</th>
             ${PRODUCT_FIELDS.map(p=>`<th>${p.label}</th>`).join('')}
           </tr></thead>
           <tbody>${sorted.map(r => {
@@ -376,121 +334,6 @@ function renderPerf(camps, trend, since, until) {
   });
 }
 
-function renderCreative() {
-  sortKey = ''; sortDir = -1;
-  const campaigns = [...new Set(allAdData.map(r => r.campaign_name))].sort();
-  document.getElementById('tab-creative').innerHTML = `
-    <div class="table-card">
-      <div class="table-header">
-        <h3>🎨 素材成效</h3>
-        <div class="table-header-right">
-          <div class="filter-row">
-            <select class="filter-select" id="campFilter" onchange="applyAdFilter()">
-              <option value="">所有廣告活動</option>
-              ${campaigns.map(c=>`<option value="${c}">${c}</option>`).join('')}
-            </select>
-            <input type="text" class="search-input" id="adSearch" placeholder="搜尋素材名稱…" oninput="applyAdFilter()">
-            <span class="count-badge" id="adCount"></span>
-          </div>
-        </div>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
-            <th>素材名稱</th>
-            <th style="text-align:center">縮圖</th>
-            <th class="sortable" onclick="sortAds('spend')">花費</th>
-            <th class="sortable" onclick="sortAds('impressions')">曝光</th>
-            <th class="sortable" onclick="sortAds('ctr')">CTR</th>
-            <th class="sortable" onclick="sortAds('cplc')">CPLC</th>
-            <th class="sortable" onclick="sortAds('cpm')">CPM</th>
-            <th class="sortable" onclick="sortAds('view_content')">Apply頁面</th>
-            <th class="sortable" onclick="sortAds('purchase')">購買</th>
-            <th class="sortable" onclick="sortAds('cpa')">CPA</th>
-            ${PRODUCT_FIELDS.map(p=>`<th class="sortable" onclick="sortAds('${p.key}')">${p.label}</th>`).join('')}
-          </tr></thead>
-          <tbody id="adTableBody"></tbody>
-        </table>
-      </div>
-    </div>`;
-  sortAds('spend');
-}
-
-function groupByName(rows) {
-  const map = {};
-  for (const r of rows) {
-    const key = r.ad_name || '—';
-    if (!map[key]) map[key] = { ad_name: key, campaign_name: r.campaign_name, spend:0, impressions:0, link_clicks:0, view_content:0, purchase:0,
-      netflix_purchase:0, max_purchase:0, newdp_purchase:0, prime_purchase:0, ott_purchase:0 };
-    const g = map[key];
-    g.spend             += r.spend             || 0;
-    g.impressions       += r.impressions       || 0;
-    g.link_clicks       += r.link_clicks       || 0;
-    g.view_content       += r.view_content       || 0;
-    g.purchase          += r.purchase          || 0;
-    g.netflix_purchase  += r.netflix_purchase  || 0;
-    g.max_purchase      += r.max_purchase      || 0;
-    g.newdp_purchase    += r.newdp_purchase    || 0;
-    g.prime_purchase    += r.prime_purchase    || 0;
-    g.ott_purchase      += r.ott_purchase      || 0;
-  }
-  return Object.values(map).map(g => ({
-    ...g,
-    ctr:  g.impressions > 0 ? g.link_clicks / g.impressions * 100 : 0,
-    cplc: g.link_clicks > 0 ? g.spend / g.link_clicks : 0,
-    cpm:  g.impressions > 0 ? g.spend / g.impressions * 1000 : 0,
-    cpa:  g.purchase > 0 ? g.spend / g.purchase : 0,
-  }));
-}
-
-function applyAdFilter() {
-  const camp = document.getElementById('campFilter')?.value || '';
-  const q = (document.getElementById('adSearch')?.value || '').toLowerCase();
-  const filtered = allAdData.filter(r =>
-    (!camp || r.campaign_name === camp) &&
-    (!q || (r.ad_name||'').toLowerCase().includes(q))
-  );
-  renderAdTable(groupByName(filtered));
-}
-
-function sortAds(key) {
-  if (sortKey === key) sortDir *= -1;
-  else { sortKey = key; sortDir = -1; }
-  document.querySelectorAll('#tab-creative th.sortable').forEach(th => {
-    th.classList.remove('sort-asc','sort-desc');
-    if (th.getAttribute('onclick') === `sortAds('${key}')`) {
-      th.classList.add(sortDir === -1 ? 'sort-desc' : 'sort-asc');
-    }
-  });
-  applyAdFilter();
-}
-
-function renderAdTable(data) {
-  const sorted = [...data].sort((a,b) => ((a[sortKey]||0)-(b[sortKey]||0)) * sortDir);
-  const maxSpend = Math.max(...sorted.map(r=>r.spend||0), 1);
-  document.getElementById('adCount').textContent = `${sorted.length} 筆`;
-  document.getElementById('adTableBody').innerHTML = sorted.map(r => {
-    const bw = Math.round((r.spend||0)/maxSpend*60);
-    const info = adUrlMap[r.ad_name] || {};
-    const thumb = info.thumb;
-    const thumbCell = thumb
-      ? `<img src="${thumb}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;display:block;border:1px solid #eee;margin:0 auto" onerror="this.style.display='none'">`
-      : '<span class="na">—</span>';
-    return `<tr>
-      <td><span class="cell-name" title="${r.ad_name}">${r.ad_name||'—'}</span><span class="cell-sub">${r.campaign_name||''}</span></td>
-      <td style="text-align:center">${thumbCell}</td>
-      <td><div class="spend-bar-wrap">${fmtM(r.spend)}<div class="spend-bar" style="width:${bw}px"></div></div></td>
-      <td>${fmtN(r.impressions)}</td>
-      <td>${fmtP(r.ctr)}</td>
-      <td>${fmtM(r.cplc)}</td>
-      <td>${fmtM(r.cpm)}</td>
-      <td>${fmtN(r.view_content)}</td>
-      <td>${fmtN(r.purchase)}</td>
-      <td>${fmtM(r.cpa)}</td>
-      ${PRODUCT_FIELDS.map(p=>`<td>${fmtN(r[p.key])}</td>`).join('')}
-    </tr>`;
-  }).join('');
-}
 </script>
 </body>
 </html>
