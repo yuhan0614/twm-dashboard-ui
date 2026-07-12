@@ -116,7 +116,7 @@
   <div class="preset-btns">
     <button class="preset-btn" onclick="applyPreset(1)">今天</button>
     <button class="preset-btn" onclick="applyPresetYesterday()">昨天</button>
-    <button class="preset-btn" onclick="applyPreset(7)">近7天</button>
+    <button class="preset-btn" id="preset7" onclick="applyPreset(7)">近7天</button>
     <button class="preset-btn" onclick="applyPreset(30)">近30天</button>
     <button class="preset-btn" onclick="applyPreset(90)">近90天</button>
     <button class="preset-btn" onclick="applyPresetMonth()">本月</button>
@@ -191,6 +191,8 @@ function applyPresetMonth() {
   from.setDate(to.getDate() - 6);
   document.getElementById('dateFrom').value = toYMD(from);
   document.getElementById('dateTo').value = toYMD(to);
+  document.getElementById('preset7').classList.add('active');
+  fetchData(false);
 })();
 
 function switchTab(name, btn) {
