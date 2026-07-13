@@ -236,8 +236,7 @@ function renderPerf(camps, trend, adsets, ageRows, genderRows, since, until) {
   const cpa  = total.purchase > 0 ? total.spend/total.purchase : 0;
   const cplc = total.link_clicks > 0 ? total.spend/total.link_clicks : 0;
   const cpm  = total.impressions > 0 ? total.spend/total.impressions*1000 : 0;
-  const sorted = [...camps].sort((a,b)=>(b.spend||0)-(a.spend||0));
-  const maxSpend = sorted[0]?.spend || 1;
+  const adsetsSorted = [...adsets].sort((a,b)=>(b.spend||0)-(a.spend||0));
 
   document.getElementById('tab-perf').innerHTML = `
     <div class="summary-grid">
@@ -267,7 +266,7 @@ function renderPerf(camps, trend, adsets, ageRows, genderRows, since, until) {
         <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
       </div>
       <div class="chart-card">
-        <h3>📊 Campaign 花費佔比</h3>
+        <h3>📊 受眾佔比</h3>
         <div class="chart-wrap"><canvas id="pieChart"></canvas></div>
       </div>
     </div>
@@ -349,7 +348,7 @@ function renderPerf(camps, trend, adsets, ageRows, genderRows, since, until) {
   const PIE_COLORS = ['#1677ff','#fa8c16','#52c41a','#eb2f96','#722ed1','#13c2c2','#fadb14','#f5222d'];
   pieChart = new Chart(document.getElementById('pieChart'), {
     type: 'doughnut',
-    data: { labels: sorted.map(r=>r.campaign_name.slice(0,16)), datasets:[{data:sorted.map(r=>r.spend),backgroundColor:PIE_COLORS,borderWidth:2,borderColor:'white'}] },
+    data: { labels: adsetsSorted.map(r=>r.adset_name.slice(0,16)), datasets:[{data:adsetsSorted.map(r=>r.spend),backgroundColor:PIE_COLORS,borderWidth:2,borderColor:'white'}] },
     options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'right',labels:{font:{size:10},boxWidth:10,padding:6}}} }
   });
 }
@@ -409,22 +408,18 @@ function renderDateTable() {
   if (!wrap || !lastTotal) return;
   const total = lastTotal;
   const periods = aggregateByPeriod(lastFilteredTrend, dateGranularity);
-  const maxSpend = Math.max(...periods.map(r=>r.spend||0), 1);
 
   wrap.innerHTML = `
     <table>
       <thead><tr>
-        <th>日期</th><th>花費</th><th>佔比</th><th>曝光</th><th>CTR</th>
+        <th>日期</th><th>花費</th><th>曝光</th><th>CTR</th>
         <th>連結點擊</th><th>CPLC</th><th>CPM</th><th>Apply<br>頁面</th><th>購買</th><th>CPA</th>
         ${PRODUCT_FIELDS.map(p=>`<th>${p.label}</th>`).join('')}
       </tr></thead>
       <tbody>${periods.map(r => {
-        const pct = total.spend > 0 ? (r.spend/total.spend*100).toFixed(1) : '0';
-        const bw = Math.round((r.spend||0)/maxSpend*80);
         return `<tr>
           <td><span class="cell-name">${r.label}</span></td>
           <td>${fmtM(r.spend)}</td>
-          <td><div class="spend-bar-wrap"><span style="font-size:11px;color:#888">${pct}%</span><div class="spend-bar" style="width:${bw}px"></div></div></td>
           <td>${fmtN(r.impressions)}</td><td>${fmtP(r.ctr)}</td>
           <td>${fmtN(r.link_clicks)}</td><td>${fmtM(r.cplc)}</td><td>${fmtM(r.cpm)}</td>
           <td>${fmtN(r.view_content)}</td><td>${fmtN(r.purchase)}</td>
@@ -435,7 +430,6 @@ function renderDateTable() {
       <tr style="background:#f0f4ff;font-weight:700;border-top:2px solid #d0d9f0;">
         <td>合計</td>
         <td>${fmtM(total.spend)}</td>
-        <td></td>
         <td>${fmtN(total.impressions)}</td>
         <td>${fmtP(total.link_clicks && total.impressions ? total.link_clicks/total.impressions*100 : 0)}</td>
         <td>${fmtN(total.link_clicks)}</td>
@@ -454,23 +448,18 @@ function renderAdsetTable(adsets) {
   const wrap = document.getElementById('adsetTableWrap');
   if (!wrap) return;
   const sorted = [...adsets].sort((a,b)=>(b.spend||0)-(a.spend||0));
-  const totalSpend = sorted.reduce((s,r)=>s+(r.spend||0), 0);
-  const maxSpend = sorted[0]?.spend || 1;
 
   wrap.innerHTML = `
     <table>
       <thead><tr>
-        <th>廣告群組</th><th>花費</th><th>佔比</th><th>曝光</th><th>CTR</th>
+        <th>廣告群組</th><th>花費</th><th>曝光</th><th>CTR</th>
         <th>連結點擊</th><th>CPLC</th><th>CPM</th><th>Apply<br>頁面</th><th>購買</th><th>CPA</th>
         ${PRODUCT_FIELDS.map(p=>`<th>${p.label}</th>`).join('')}
       </tr></thead>
       <tbody>${sorted.map(r => {
-        const pct = totalSpend > 0 ? (r.spend/totalSpend*100).toFixed(1) : '0';
-        const bw = Math.round((r.spend||0)/maxSpend*80);
         return `<tr>
           <td><span class="cell-name" title="${r.adset_name}">${r.adset_name||'—'}</span></td>
           <td>${fmtM(r.spend)}</td>
-          <td><div class="spend-bar-wrap"><span style="font-size:11px;color:#888">${pct}%</span><div class="spend-bar" style="width:${bw}px"></div></div></td>
           <td>${fmtN(r.impressions)}</td><td>${fmtP(r.ctr)}</td>
           <td>${fmtN(r.link_clicks)}</td><td>${fmtM(r.cplc)}</td><td>${fmtM(r.cpm)}</td>
           <td>${fmtN(r.view_content)}</td><td>${fmtN(r.purchase)}</td>
