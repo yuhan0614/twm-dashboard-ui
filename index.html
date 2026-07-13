@@ -52,6 +52,7 @@
   .c-green .val { color: #52c41a; }
 
   .charts-row { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 20px; }
+  .charts-row-rev { grid-template-columns: 1fr 2fr; }
   .chart-card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.07); }
   .chart-card h3 { font-size: 14px; font-weight: 600; color: #333; margin-bottom: 14px; }
   .chart-wrap { position: relative; height: 220px; }
@@ -129,7 +130,7 @@
 <script>
 const API_BASE = 'https://twm-api-xa53.onrender.com';
 const ACCOUNT_ID = '1558628995676725';
-let trendChart, pieChart;
+let trendChart, pieChart, ageChart, ageComboChart, genderChart, genderComboChart;
 let lastFilteredTrend = [];
 let lastTotal = null;
 let dateGranularity = 'day';
@@ -180,16 +181,22 @@ async function fetchData(force = false) {
 
   try {
     const f = force ? '&force=true' : '';
-    const [campRes, trendRes] = await Promise.all([
+    const [campRes, trendRes, adsetRes, ageRes, genderRes] = await Promise.all([
       fetch(`${API_BASE}/api/insights?accounts=${ACCOUNT_ID}&since=${since}&until=${until}&level=campaign${f}`),
       fetch(`${API_BASE}/api/insights?accounts=${ACCOUNT_ID}&since=${since}&until=${until}&level=account&time_increment=daily${f}`),
+      fetch(`${API_BASE}/api/insights?accounts=${ACCOUNT_ID}&since=${since}&until=${until}&level=adset${f}`),
+      fetch(`${API_BASE}/api/insights?accounts=${ACCOUNT_ID}&since=${since}&until=${until}&level=account&breakdowns=age${f}`),
+      fetch(`${API_BASE}/api/insights?accounts=${ACCOUNT_ID}&since=${since}&until=${until}&level=account&breakdowns=gender${f}`),
     ]);
     const campJson  = await campRes.json();
     const trendJson = await trendRes.json();
     const campData  = campJson.data || [];
     const trendData = trendJson.data || [];
+    const adsetData = (await adsetRes.json()).data || [];
+    const ageData   = (await ageRes.json()).data || [];
+    const genderData = (await genderRes.json()).data || [];
 
-    renderPerf(campData, trendData, since, until);
+    renderPerf(campData, trendData, adsetData, ageData, genderData, since, until);
 
     const updatedAt = campJson.updated || new Date().toLocaleString('zh-TW');
     document.getElementById('lastUpdate').textContent = updatedAt + (campJson.cached ? '（快取）' : '');
@@ -215,7 +222,7 @@ const PRODUCT_FIELDS = [
   { key: 'ott_purchase',     label: 'OTT<br>Purchase' },
 ];
 
-function renderPerf(camps, trend, since, until) {
+function renderPerf(camps, trend, adsets, ageRows, genderRows, since, until) {
   const total = camps.reduce((a,r) => ({
     spend: a.spend+(r.spend||0), impressions: a.impressions+(r.impressions||0),
     link_clicks: a.link_clicks+(r.link_clicks||0), view_content: a.view_content+(r.view_content||0),
@@ -276,11 +283,49 @@ function renderPerf(camps, trend, since, until) {
         </div>
       </div>
       <div class="table-wrap" id="dateTableWrap"></div>
+    </div>
+    <div class="table-card">
+      <div class="table-header">
+        <h3>👥 受眾表現（依廣告群組）</h3>
+        <span style="font-size:12px;color:#aaa;">${adsets.length} 個廣告群組</span>
+      </div>
+      <div class="table-wrap" id="adsetTableWrap"></div>
+    </div>
+    <div class="charts-row charts-row-rev">
+      <div class="chart-card">
+        <h3>🎂 花費分佈（年齡）</h3>
+        <div class="chart-wrap"><canvas id="ageChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>📊 花費／購買（年齡）</h3>
+        <div class="chart-wrap"><canvas id="ageComboChart"></canvas></div>
+      </div>
+    </div>
+    <div class="table-card">
+      <div class="table-header"><h3>🎂 年齡分析</h3></div>
+      <div class="table-wrap" id="ageTableWrap"></div>
+    </div>
+    <div class="charts-row charts-row-rev">
+      <div class="chart-card">
+        <h3>🚻 花費分佈（性別）</h3>
+        <div class="chart-wrap"><canvas id="genderChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>📊 花費／購買（性別）</h3>
+        <div class="chart-wrap"><canvas id="genderComboChart"></canvas></div>
+      </div>
+    </div>
+    <div class="table-card">
+      <div class="table-header"><h3>🚻 性別分析</h3></div>
+      <div class="table-wrap" id="genderTableWrap"></div>
     </div>`;
 
   lastFilteredTrend = trend.filter(r => r.date_start >= since && r.date_start <= until);
   lastTotal = total;
   renderDateTable();
+  renderAdsetTable(adsets);
+  renderDemographic('age', ageRows);
+  renderDemographic('gender', genderRows);
 
   if (trendChart) trendChart.destroy();
   if (pieChart)   pieChart.destroy();
@@ -403,6 +448,107 @@ function renderDateTable() {
       </tr>
       </tbody>
     </table>`;
+}
+
+function renderAdsetTable(adsets) {
+  const wrap = document.getElementById('adsetTableWrap');
+  if (!wrap) return;
+  const sorted = [...adsets].sort((a,b)=>(b.spend||0)-(a.spend||0));
+  const totalSpend = sorted.reduce((s,r)=>s+(r.spend||0), 0);
+  const maxSpend = sorted[0]?.spend || 1;
+
+  wrap.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>廣告群組</th><th>花費</th><th>佔比</th><th>曝光</th><th>CTR</th>
+        <th>連結點擊</th><th>CPLC</th><th>CPM</th><th>Apply<br>頁面</th><th>購買</th><th>CPA</th>
+        ${PRODUCT_FIELDS.map(p=>`<th>${p.label}</th>`).join('')}
+      </tr></thead>
+      <tbody>${sorted.map(r => {
+        const pct = totalSpend > 0 ? (r.spend/totalSpend*100).toFixed(1) : '0';
+        const bw = Math.round((r.spend||0)/maxSpend*80);
+        return `<tr>
+          <td><span class="cell-name" title="${r.adset_name}">${r.adset_name||'—'}</span></td>
+          <td>${fmtM(r.spend)}</td>
+          <td><div class="spend-bar-wrap"><span style="font-size:11px;color:#888">${pct}%</span><div class="spend-bar" style="width:${bw}px"></div></div></td>
+          <td>${fmtN(r.impressions)}</td><td>${fmtP(r.ctr)}</td>
+          <td>${fmtN(r.link_clicks)}</td><td>${fmtM(r.cplc)}</td><td>${fmtM(r.cpm)}</td>
+          <td>${fmtN(r.view_content)}</td><td>${fmtN(r.purchase)}</td>
+          <td>${fmtM(r.cpa)}</td>
+          ${PRODUCT_FIELDS.map(p=>`<td>${fmtN(r[p.key])}</td>`).join('')}
+        </tr>`;
+      }).join('')}
+      </tbody>
+    </table>`;
+}
+
+const AGE_ORDER = ['18-24','25-34','35-44','45-54','55-64','65+'];
+const GENDER_ORDER = ['male','female','unknown'];
+const GENDER_LABELS = { male: '男性', female: '女性', unknown: '不明' };
+
+function renderDemographic(kind, rows) {
+  const isAge = kind === 'age';
+  const order = isAge ? AGE_ORDER : GENDER_ORDER;
+  const labelFor = r => isAge ? (r.age || '不明') : (GENDER_LABELS[r.gender] || '不明');
+  const sorted = [...rows].sort((a,b) => {
+    const av = isAge ? a.age : a.gender, bv = isAge ? b.age : b.gender;
+    const ai = order.indexOf(av), bi = order.indexOf(bv);
+    return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
+  });
+  const total = sorted.reduce((s,r)=>s+(r.spend||0), 0);
+  const maxSpend = Math.max(...sorted.map(r=>r.spend||0), 1);
+
+  const wrap = document.getElementById(kind + 'TableWrap');
+  wrap.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>${isAge ? '年齡' : '性別'}</th><th>花費</th><th>佔比</th><th>曝光</th><th>CTR</th>
+        <th>連結點擊</th><th>CPLC</th><th>CPM</th><th>Apply<br>頁面</th><th>購買</th><th>CPA</th>
+      </tr></thead>
+      <tbody>${sorted.map(r => {
+        const pct = total > 0 ? (r.spend/total*100).toFixed(1) : '0';
+        const bw = Math.round((r.spend||0)/maxSpend*80);
+        return `<tr>
+          <td><span class="cell-name">${labelFor(r)}</span></td>
+          <td>${fmtM(r.spend)}</td>
+          <td><div class="spend-bar-wrap"><span style="font-size:11px;color:#888">${pct}%</span><div class="spend-bar" style="width:${bw}px"></div></div></td>
+          <td>${fmtN(r.impressions)}</td><td>${fmtP(r.ctr)}</td>
+          <td>${fmtN(r.link_clicks)}</td><td>${fmtM(r.cplc)}</td><td>${fmtM(r.cpm)}</td>
+          <td>${fmtN(r.view_content)}</td><td>${fmtN(r.purchase)}</td>
+          <td>${fmtM(r.cpa)}</td>
+        </tr>`;
+      }).join('')}
+      </tbody>
+    </table>`;
+
+  const PIE_COLORS = ['#1677ff','#fa8c16','#52c41a','#eb2f96','#722ed1','#13c2c2','#fadb14'];
+  const labels = sorted.map(labelFor);
+
+  if (isAge) { if (ageChart) ageChart.destroy(); if (ageComboChart) ageComboChart.destroy(); }
+  else       { if (genderChart) genderChart.destroy(); if (genderComboChart) genderComboChart.destroy(); }
+
+  const doughnut = new Chart(document.getElementById(kind + 'Chart'), {
+    type: 'doughnut',
+    data: { labels, datasets: [{ data: sorted.map(r=>r.spend||0), backgroundColor: PIE_COLORS, borderWidth: 2, borderColor: 'white' }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 10, padding: 6 } } } }
+  });
+
+  const combo = new Chart(document.getElementById(kind + 'ComboChart'), {
+    data: { labels, datasets: [
+      { type: 'bar',  label: '花費', data: sorted.map(r=>r.spend||0),    backgroundColor: 'rgba(22,119,255,0.25)', borderColor: '#1677ff', borderWidth: 1, yAxisID: 'y', borderRadius: 3 },
+      { type: 'line', label: '購買', data: sorted.map(r=>r.purchase||0), borderColor: '#fa8c16', borderWidth: 2, pointRadius: 3, tension: 0.3, yAxisID: 'y3' },
+    ]},
+    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { display: false } },
+      scales: {
+        x:  { grid: { display: false }, ticks: { font: { size: 10 } } },
+        y:  { position: 'left',  beginAtZero: true, grid: { color: '#f0f2f5' }, ticks: { callback: v=>'NT$'+Math.round(v/1000)+'K', font: { size: 10 } } },
+        y3: { position: 'right', beginAtZero: true, grid: { display: false }, ticks: { font: { size: 10 } } },
+      }
+    }
+  });
+
+  if (isAge) { ageChart = doughnut; ageComboChart = combo; }
+  else       { genderChart = doughnut; genderComboChart = combo; }
 }
 
 </script>
