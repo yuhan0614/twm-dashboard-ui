@@ -34,11 +34,6 @@
 
   .main { padding: 20px 24px; max-width: 1500px; margin: 0 auto; }
 
-  .loading-overlay { display: none; position: fixed; inset: 0; background: rgba(255,255,255,0.75); z-index: 100; align-items: center; justify-content: center; flex-direction: column; gap: 12px; }
-  .loading-overlay.show { display: flex; }
-  .spinner { width: 40px; height: 40px; border: 4px solid #e4e6ea; border-top-color: #1677ff; border-radius: 50%; animation: spin 0.8s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
   .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
   .sc { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.07); }
   .sc .lbl { font-size: 11px; color: #65676b; font-weight: 500; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px; }
@@ -105,20 +100,15 @@
     <button class="preset-btn" onclick="applyPresetMonth()">本月</button>
   </div>
   <div class="date-inputs">
-    <input type="date" id="dateFrom" onchange="clearPreset()">
+    <input type="date" id="dateFrom" onchange="clearPreset(); fetchData(false)">
     <span style="color:#bbb">至</span>
-    <input type="date" id="dateTo" onchange="clearPreset()">
+    <input type="date" id="dateTo" onchange="clearPreset(); fetchData(false)">
   </div>
   <button class="fetch-btn" id="fetchBtn" onclick="fetchData(true)">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4"/></svg>
     更新資料
   </button>
   <span class="status-text" id="statusText"></span>
-</div>
-
-<div class="loading-overlay" id="loadingOverlay">
-  <div class="spinner"></div>
-  <span style="color:#555;font-size:14px;">正在從 Meta API 抓取資料…</span>
 </div>
 
 <div class="main">
@@ -148,18 +138,21 @@ function applyPreset(days) {
   document.getElementById('dateFrom').value = toYMD(from);
   document.getElementById('dateTo').value = toYMD(to);
   clearPreset(); event.target.classList.add('active');
+  fetchData(false);
 }
 function applyPresetYesterday() {
   const d = new Date(); d.setDate(d.getDate() - 1);
   document.getElementById('dateFrom').value = toYMD(d);
   document.getElementById('dateTo').value = toYMD(d);
   clearPreset(); event.target.classList.add('active');
+  fetchData(false);
 }
 function applyPresetMonth() {
   const now = new Date();
   document.getElementById('dateFrom').value = toYMD(new Date(now.getFullYear(), now.getMonth(), 1));
   document.getElementById('dateTo').value = toYMD(now);
   clearPreset(); event.target.classList.add('active');
+  fetchData(false);
 }
 (function() {
   const to = new Date(), from = new Date();
@@ -170,33 +163,57 @@ function applyPresetMonth() {
   fetchData(false);
 })();
 
+function cacheGet(key) {
+  try { const v = sessionStorage.getItem(key); return v ? JSON.parse(v) : null; } catch(e) { return null; }
+}
+function cacheSet(key, val) {
+  try { sessionStorage.setItem(key, JSON.stringify(val)); } catch(e) {}
+}
+async function cachedFetchJson(url, force) {
+  if (!force) {
+    const cached = cacheGet('twmCache:' + url);
+    if (cached) return cached;
+  }
+  const res = await fetch(force ? url + '&force=true' : url);
+  const json = await res.json();
+  cacheSet('twmCache:' + url, json);
+  return json;
+}
+
+function showSectionError(wrapId, e) {
+  const el = document.getElementById(wrapId);
+  if (el) el.innerHTML = `<div style="text-align:center;padding:40px;color:#f5222d;">載入失敗：${e.message}</div>`;
+}
+
 async function fetchData(force = false) {
   const since = document.getElementById('dateFrom').value;
   const until = document.getElementById('dateTo').value;
   const btn = document.getElementById('fetchBtn');
   const status = document.getElementById('statusText');
   btn.disabled = true;
-  document.getElementById('loadingOverlay').classList.add('show');
   status.textContent = '載入中…'; status.className = 'status-text';
 
+  renderSkeleton();
+
+  const base = `${API_BASE}/api/insights?accounts=${ACCOUNT_ID}&since=${since}&until=${until}`;
+  const campP   = cachedFetchJson(`${base}&level=campaign`, force);
+  const trendP  = cachedFetchJson(`${base}&level=account&time_increment=daily`, force);
+  const adsetP  = cachedFetchJson(`${base}&level=adset`, force);
+  const ageP    = cachedFetchJson(`${base}&level=account&breakdowns=age`, force);
+  const genderP = cachedFetchJson(`${base}&level=account&breakdowns=gender`, force);
+
+  // Progressive rendering: each section paints as soon as its own fetch resolves,
+  // instead of the whole page waiting on the slowest of five calls.
+  adsetP.then(j => renderAudience(j.data || [])).catch(e => showSectionError('adsetTableWrap', e));
+  ageP.then(j => renderDemographic('age', j.data || [])).catch(e => showSectionError('ageTableWrap', e));
+  genderP.then(j => renderDemographic('gender', j.data || [])).catch(e => showSectionError('genderTableWrap', e));
+
   try {
-    const f = force ? '&force=true' : '';
-    const [campRes, trendRes, adsetRes, ageRes, genderRes] = await Promise.all([
-      fetch(`${API_BASE}/api/insights?accounts=${ACCOUNT_ID}&since=${since}&until=${until}&level=campaign${f}`),
-      fetch(`${API_BASE}/api/insights?accounts=${ACCOUNT_ID}&since=${since}&until=${until}&level=account&time_increment=daily${f}`),
-      fetch(`${API_BASE}/api/insights?accounts=${ACCOUNT_ID}&since=${since}&until=${until}&level=adset${f}`),
-      fetch(`${API_BASE}/api/insights?accounts=${ACCOUNT_ID}&since=${since}&until=${until}&level=account&breakdowns=age${f}`),
-      fetch(`${API_BASE}/api/insights?accounts=${ACCOUNT_ID}&since=${since}&until=${until}&level=account&breakdowns=gender${f}`),
-    ]);
-    const campJson  = await campRes.json();
-    const trendJson = await trendRes.json();
+    const [campJson, trendJson] = await Promise.all([campP, trendP]);
     const campData  = campJson.data || [];
     const trendData = trendJson.data || [];
-    const adsetData = (await adsetRes.json()).data || [];
-    const ageData   = (await ageRes.json()).data || [];
-    const genderData = (await genderRes.json()).data || [];
 
-    renderPerf(campData, trendData, adsetData, ageData, genderData, since, until);
+    renderCore(campData, trendData, since, until);
 
     const updatedAt = campJson.updated || new Date().toLocaleString('zh-TW');
     document.getElementById('lastUpdate').textContent = updatedAt + (campJson.cached ? '（快取）' : '');
@@ -206,7 +223,6 @@ async function fetchData(force = false) {
     status.textContent = `❌ ${e.message}`; status.className = 'status-text err';
   } finally {
     btn.disabled = false;
-    document.getElementById('loadingOverlay').classList.remove('show');
   }
 }
 
@@ -222,40 +238,17 @@ const PRODUCT_FIELDS = [
   { key: 'ott_purchase',     label: 'OTT<br>Purchase' },
 ];
 
-function renderPerf(camps, trend, adsets, ageRows, genderRows, since, until) {
-  const total = camps.reduce((a,r) => ({
-    spend: a.spend+(r.spend||0), impressions: a.impressions+(r.impressions||0),
-    link_clicks: a.link_clicks+(r.link_clicks||0), view_content: a.view_content+(r.view_content||0),
-    purchase: a.purchase+(r.purchase||0),
-    netflix_purchase: a.netflix_purchase+(r.netflix_purchase||0),
-    max_purchase: a.max_purchase+(r.max_purchase||0),
-    newdp_purchase: a.newdp_purchase+(r.newdp_purchase||0),
-    prime_purchase: a.prime_purchase+(r.prime_purchase||0),
-    ott_purchase: a.ott_purchase+(r.ott_purchase||0),
-  }), {spend:0,impressions:0,link_clicks:0,view_content:0,purchase:0,netflix_purchase:0,max_purchase:0,newdp_purchase:0,prime_purchase:0,ott_purchase:0});
-  const cpa  = total.purchase > 0 ? total.spend/total.purchase : 0;
-  const cplc = total.link_clicks > 0 ? total.spend/total.link_clicks : 0;
-  const cpm  = total.impressions > 0 ? total.spend/total.impressions*1000 : 0;
-  const adsetsSorted = [...adsets].sort((a,b)=>(b.spend||0)-(a.spend||0));
+function loadingPlaceholder() {
+  return `<div style="text-align:center;padding:40px;color:#aaa;">載入中…</div>`;
+}
+function loadingCards(n) {
+  return Array.from({length:n}).map(()=>`<div class="sc"><div class="lbl">—</div><div class="val" style="color:#ddd">…</div></div>`).join('');
+}
 
+function renderSkeleton() {
   document.getElementById('tab-perf').innerHTML = `
-    <div class="summary-grid">
-      <div class="sc c-blue"><div class="lbl">花費</div><div class="val">${fmtM(total.spend)}</div><div class="sub">${since} ～ ${until}</div></div>
-      <div class="sc"><div class="lbl">曝光</div><div class="val">${(total.impressions/10000).toFixed(1)}萬</div><div class="sub">${total.impressions.toLocaleString()}</div></div>
-      <div class="sc c-purple"><div class="lbl">連結點擊</div><div class="val">${total.link_clicks.toLocaleString()}</div><div class="sub">CTR ${fmtP(total.impressions?total.link_clicks/total.impressions*100:0)}</div></div>
-      <div class="sc"><div class="lbl">CPLC</div><div class="val">${fmtM(cplc)}</div><div class="sub">花費 / 連結點擊</div></div>
-      <div class="sc"><div class="lbl">CPM</div><div class="val">${fmtM(cpm)}</div><div class="sub">每千次曝光成本</div></div>
-      <div class="sc c-orange"><div class="lbl">Apply頁面</div><div class="val">${Math.round(total.view_content).toLocaleString()}</div><div class="sub">內容瀏覽次數</div></div>
-      <div class="sc c-teal"><div class="lbl">購買</div><div class="val">${Math.round(total.purchase).toLocaleString()}</div><div class="sub">Purchase</div></div>
-      <div class="sc"><div class="lbl">CPA（購買）</div><div class="val">${fmtM(cpa)}</div><div class="sub">Cost per Purchase</div></div>
-    </div>
-    <div class="summary-grid">
-      <div class="sc c-pink"><div class="lbl">Netflix_Purchase</div><div class="val">${Math.round(total.netflix_purchase).toLocaleString()}</div></div>
-      <div class="sc c-pink"><div class="lbl">Max_Purchase</div><div class="val">${Math.round(total.max_purchase).toLocaleString()}</div></div>
-      <div class="sc c-pink"><div class="lbl">NewDP_Purchase</div><div class="val">${Math.round(total.newdp_purchase).toLocaleString()}</div></div>
-      <div class="sc c-pink"><div class="lbl">Prime_Purchase</div><div class="val">${Math.round(total.prime_purchase).toLocaleString()}</div></div>
-      <div class="sc c-pink"><div class="lbl">OTT_Purchase</div><div class="val">${Math.round(total.ott_purchase).toLocaleString()}</div></div>
-    </div>
+    <div class="summary-grid" id="summaryGrid">${loadingCards(8)}</div>
+    <div class="summary-grid" id="productGrid">${loadingCards(5)}</div>
     <div class="charts-row">
       <div class="chart-card">
         <h3>📅 每日趨勢</h3>
@@ -281,14 +274,14 @@ function renderPerf(camps, trend, adsets, ageRows, genderRows, since, until) {
           </div>
         </div>
       </div>
-      <div class="table-wrap" id="dateTableWrap"></div>
+      <div class="table-wrap" id="dateTableWrap">${loadingPlaceholder()}</div>
     </div>
     <div class="table-card">
       <div class="table-header">
         <h3>👥 受眾表現（依廣告群組）</h3>
-        <span style="font-size:12px;color:#aaa;">${adsets.length} 個廣告群組</span>
+        <span id="adsetCount" style="font-size:12px;color:#aaa;"></span>
       </div>
-      <div class="table-wrap" id="adsetTableWrap"></div>
+      <div class="table-wrap" id="adsetTableWrap">${loadingPlaceholder()}</div>
     </div>
     <div class="charts-row charts-row-rev">
       <div class="chart-card">
@@ -302,7 +295,7 @@ function renderPerf(camps, trend, adsets, ageRows, genderRows, since, until) {
     </div>
     <div class="table-card">
       <div class="table-header"><h3>🎂 年齡分析</h3></div>
-      <div class="table-wrap" id="ageTableWrap"></div>
+      <div class="table-wrap" id="ageTableWrap">${loadingPlaceholder()}</div>
     </div>
     <div class="charts-row charts-row-rev">
       <div class="chart-card">
@@ -316,19 +309,47 @@ function renderPerf(camps, trend, adsets, ageRows, genderRows, since, until) {
     </div>
     <div class="table-card">
       <div class="table-header"><h3>🚻 性別分析</h3></div>
-      <div class="table-wrap" id="genderTableWrap"></div>
+      <div class="table-wrap" id="genderTableWrap">${loadingPlaceholder()}</div>
     </div>`;
+}
+
+function renderCore(camps, trend, since, until) {
+  const total = camps.reduce((a,r) => ({
+    spend: a.spend+(r.spend||0), impressions: a.impressions+(r.impressions||0),
+    link_clicks: a.link_clicks+(r.link_clicks||0), view_content: a.view_content+(r.view_content||0),
+    purchase: a.purchase+(r.purchase||0),
+    netflix_purchase: a.netflix_purchase+(r.netflix_purchase||0),
+    max_purchase: a.max_purchase+(r.max_purchase||0),
+    newdp_purchase: a.newdp_purchase+(r.newdp_purchase||0),
+    prime_purchase: a.prime_purchase+(r.prime_purchase||0),
+    ott_purchase: a.ott_purchase+(r.ott_purchase||0),
+  }), {spend:0,impressions:0,link_clicks:0,view_content:0,purchase:0,netflix_purchase:0,max_purchase:0,newdp_purchase:0,prime_purchase:0,ott_purchase:0});
+  const cpa  = total.purchase > 0 ? total.spend/total.purchase : 0;
+  const cplc = total.link_clicks > 0 ? total.spend/total.link_clicks : 0;
+  const cpm  = total.impressions > 0 ? total.spend/total.impressions*1000 : 0;
+
+  document.getElementById('summaryGrid').innerHTML = `
+    <div class="sc c-blue"><div class="lbl">花費</div><div class="val">${fmtM(total.spend)}</div><div class="sub">${since} ～ ${until}</div></div>
+    <div class="sc"><div class="lbl">曝光</div><div class="val">${(total.impressions/10000).toFixed(1)}萬</div><div class="sub">${total.impressions.toLocaleString()}</div></div>
+    <div class="sc c-purple"><div class="lbl">連結點擊</div><div class="val">${total.link_clicks.toLocaleString()}</div><div class="sub">CTR ${fmtP(total.impressions?total.link_clicks/total.impressions*100:0)}</div></div>
+    <div class="sc"><div class="lbl">CPLC</div><div class="val">${fmtM(cplc)}</div><div class="sub">花費 / 連結點擊</div></div>
+    <div class="sc"><div class="lbl">CPM</div><div class="val">${fmtM(cpm)}</div><div class="sub">每千次曝光成本</div></div>
+    <div class="sc c-orange"><div class="lbl">Apply頁面</div><div class="val">${Math.round(total.view_content).toLocaleString()}</div><div class="sub">內容瀏覽次數</div></div>
+    <div class="sc c-teal"><div class="lbl">購買</div><div class="val">${Math.round(total.purchase).toLocaleString()}</div><div class="sub">Purchase</div></div>
+    <div class="sc"><div class="lbl">CPA（購買）</div><div class="val">${fmtM(cpa)}</div><div class="sub">Cost per Purchase</div></div>`;
+
+  document.getElementById('productGrid').innerHTML = `
+    <div class="sc c-pink"><div class="lbl">Netflix_Purchase</div><div class="val">${Math.round(total.netflix_purchase).toLocaleString()}</div></div>
+    <div class="sc c-pink"><div class="lbl">Max_Purchase</div><div class="val">${Math.round(total.max_purchase).toLocaleString()}</div></div>
+    <div class="sc c-pink"><div class="lbl">NewDP_Purchase</div><div class="val">${Math.round(total.newdp_purchase).toLocaleString()}</div></div>
+    <div class="sc c-pink"><div class="lbl">Prime_Purchase</div><div class="val">${Math.round(total.prime_purchase).toLocaleString()}</div></div>
+    <div class="sc c-pink"><div class="lbl">OTT_Purchase</div><div class="val">${Math.round(total.ott_purchase).toLocaleString()}</div></div>`;
 
   lastFilteredTrend = trend.filter(r => r.date_start >= since && r.date_start <= until);
   lastTotal = total;
   renderDateTable();
-  renderAdsetTable(adsets);
-  renderDemographic('age', ageRows);
-  renderDemographic('gender', genderRows);
 
   if (trendChart) trendChart.destroy();
-  if (pieChart)   pieChart.destroy();
-
   const filteredTrend = lastFilteredTrend;
   const tDates = filteredTrend.map(r => r.date_start);
   trendChart = new Chart(document.getElementById('trendChart'), {
@@ -344,7 +365,15 @@ function renderPerf(camps, trend, adsets, ageRows, genderRows, since, until) {
       }
     }
   });
+}
 
+function renderAudience(adsets) {
+  const countEl = document.getElementById('adsetCount');
+  if (countEl) countEl.textContent = `${adsets.length} 個廣告群組`;
+  renderAdsetTable(adsets);
+
+  const adsetsSorted = [...adsets].sort((a,b)=>(b.spend||0)-(a.spend||0));
+  if (pieChart) pieChart.destroy();
   const PIE_COLORS = ['#1677ff','#fa8c16','#52c41a','#eb2f96','#722ed1','#13c2c2','#fadb14','#f5222d'];
   pieChart = new Chart(document.getElementById('pieChart'), {
     type: 'doughnut',
