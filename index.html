@@ -32,6 +32,13 @@
   .status-text.ok { color: #52c41a; }
   .status-text.err { color: #f5222d; }
 
+  .tabs { background: white; border-bottom: 1px solid #e4e6ea; padding: 0 24px; display: flex; gap: 0; }
+  .tab-btn { padding: 13px 20px; font-size: 14px; font-weight: 500; color: #888; border: none; background: none; cursor: pointer; border-bottom: 3px solid transparent; transition: all 0.15s; }
+  .tab-btn:hover { color: #1677ff; }
+  .tab-btn.active { color: #1677ff; border-bottom-color: #1677ff; font-weight: 600; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
   .main { padding: 20px 24px; max-width: 1500px; margin: 0 auto; }
 
   .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
@@ -90,30 +97,49 @@
   </div>
 </div>
 
-<div class="controls">
-  <div class="preset-btns">
-    <button class="preset-btn" onclick="applyPreset(1)">今天</button>
-    <button class="preset-btn" onclick="applyPresetYesterday()">昨天</button>
-    <button class="preset-btn" id="preset7" onclick="applyPreset(7)">近7天</button>
-    <button class="preset-btn" onclick="applyPreset(30)">近30天</button>
-    <button class="preset-btn" onclick="applyPreset(90)">近90天</button>
-    <button class="preset-btn" onclick="applyPresetMonth()">本月</button>
-  </div>
-  <div class="date-inputs">
-    <input type="date" id="dateFrom" onchange="clearPreset(); fetchData(false)">
-    <span style="color:#bbb">至</span>
-    <input type="date" id="dateTo" onchange="clearPreset(); fetchData(false)">
-  </div>
-  <button class="fetch-btn" id="fetchBtn" onclick="fetchData(true)">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4"/></svg>
-    更新資料
-  </button>
-  <span class="status-text" id="statusText"></span>
+<div class="tabs">
+  <button class="tab-btn active" onclick="switchTab('meta', this)">📊 Meta 成效</button>
+  <button class="tab-btn" onclick="switchTab('google', this)">🔍 Google Ads</button>
 </div>
 
 <div class="main">
-  <div id="tab-perf">
-    <div style="text-align:center;padding:60px;color:#aaa;">點擊「更新資料」開始載入</div>
+  <div class="tab-panel active" id="tab-meta-panel">
+    <div class="controls">
+      <div class="preset-btns">
+        <button class="preset-btn" onclick="applyPreset(1)">今天</button>
+        <button class="preset-btn" onclick="applyPresetYesterday()">昨天</button>
+        <button class="preset-btn" id="preset7" onclick="applyPreset(7)">近7天</button>
+        <button class="preset-btn" onclick="applyPreset(30)">近30天</button>
+        <button class="preset-btn" onclick="applyPreset(90)">近90天</button>
+        <button class="preset-btn" onclick="applyPresetMonth()">本月</button>
+      </div>
+      <div class="date-inputs">
+        <input type="date" id="dateFrom" onchange="clearPreset(); fetchData(false)">
+        <span style="color:#bbb">至</span>
+        <input type="date" id="dateTo" onchange="clearPreset(); fetchData(false)">
+      </div>
+      <button class="fetch-btn" id="fetchBtn" onclick="fetchData(true)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4"/></svg>
+        更新資料
+      </button>
+      <span class="status-text" id="statusText"></span>
+    </div>
+    <div id="tab-perf">
+      <div style="text-align:center;padding:60px;color:#aaa;">點擊「更新資料」開始載入</div>
+    </div>
+  </div>
+  <div class="tab-panel" id="tab-google-panel">
+    <div class="controls">
+      <span style="font-size:12px;color:#888;">資料來源：Google Ads 指令碼每日寫入 Sheet，最近 30 天</span>
+      <button class="fetch-btn" id="googleFetchBtn" onclick="fetchGoogleData(true)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4"/></svg>
+        更新資料
+      </button>
+      <span class="status-text" id="googleStatusText"></span>
+    </div>
+    <div id="tab-google">
+      <div style="text-align:center;padding:60px;color:#aaa;">點擊「更新資料」開始載入</div>
+    </div>
   </div>
 </div>
 
@@ -124,6 +150,18 @@ let trendChart, pieChart, ageChart, ageComboChart, genderChart, genderComboChart
 let lastFilteredTrend = [];
 let lastTotal = null;
 let dateGranularity = 'day';
+let googleLoaded = false;
+
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tab-' + name + '-panel').classList.add('active');
+  if (name === 'google' && !googleLoaded) {
+    googleLoaded = true;
+    fetchGoogleData(false);
+  }
+}
 
 function toYMD(d) {
   const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
@@ -567,6 +605,116 @@ function renderDemographic(kind, rows) {
 
   if (isAge) { ageChart = doughnut; ageComboChart = combo; }
   else       { genderChart = doughnut; genderComboChart = combo; }
+}
+
+function renderGoogleSkeleton() {
+  document.getElementById('tab-google').innerHTML = `
+    <div class="summary-grid" id="googleSummaryGrid">${loadingCards(6)}</div>
+    <div class="table-card">
+      <div class="table-header"><h3>🎯 依廣告活動</h3></div>
+      <div class="table-wrap" id="googleCampaignWrap">${loadingPlaceholder()}</div>
+    </div>
+    <div class="table-card">
+      <div class="table-header"><h3>📝 依標題</h3></div>
+      <div class="table-wrap" id="googleHeadlineWrap">${loadingPlaceholder()}</div>
+    </div>
+    <div class="table-card">
+      <div class="table-header"><h3>💬 依文案</h3></div>
+      <div class="table-wrap" id="googleDescriptionWrap">${loadingPlaceholder()}</div>
+    </div>`;
+}
+
+async function fetchGoogleData(force = false) {
+  const btn = document.getElementById('googleFetchBtn');
+  const status = document.getElementById('googleStatusText');
+  btn.disabled = true;
+  status.textContent = '載入中…'; status.className = 'status-text';
+
+  renderGoogleSkeleton();
+
+  const base = `${API_BASE}/api/google_insights`;
+  const campP = cachedFetchJson(`${base}?report=campaign`, force);
+  const headP = cachedFetchJson(`${base}?report=headline`, force);
+  const descP = cachedFetchJson(`${base}?report=description`, force);
+
+  headP.then(j => renderGoogleTable('googleHeadlineWrap', '標題', aggregateGoogleRows(j.data || [])))
+       .catch(e => showSectionError('googleHeadlineWrap', e));
+  descP.then(j => renderGoogleTable('googleDescriptionWrap', '文案', aggregateGoogleRows(j.data || [])))
+       .catch(e => showSectionError('googleDescriptionWrap', e));
+
+  try {
+    const campJson = await campP;
+    const agg = aggregateGoogleRows(campJson.data || []);
+    renderGoogleSummary(agg);
+    renderGoogleTable('googleCampaignWrap', '廣告活動', agg);
+    status.textContent = `✓ 完成` + (campJson.updated ? `・${campJson.updated}` : '') + (campJson.cached ? '（快取）' : '');
+    status.className = 'status-text ok';
+  } catch(e) {
+    status.textContent = `❌ ${e.message}`; status.className = 'status-text err';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function aggregateGoogleRows(rows) {
+  const map = {};
+  for (const r of rows) {
+    const key = r.name || '—';
+    if (!map[key]) map[key] = { name: key, spend: 0, impressions: 0, clicks: 0, conversions: 0 };
+    const g = map[key];
+    g.spend       += r.spend       || 0;
+    g.impressions += r.impressions || 0;
+    g.clicks      += r.clicks      || 0;
+    g.conversions += r.conversions || 0;
+  }
+  return Object.values(map)
+    .map(g => ({
+      ...g,
+      ctr: g.impressions > 0 ? g.clicks / g.impressions * 100 : 0,
+      cpc: g.clicks > 0 ? g.spend / g.clicks : 0,
+      cpa: g.conversions > 0 ? g.spend / g.conversions : 0,
+    }))
+    .sort((a, b) => (b.spend || 0) - (a.spend || 0));
+}
+
+function renderGoogleSummary(agg) {
+  const total = agg.reduce((a, r) => ({
+    spend: a.spend + (r.spend || 0), impressions: a.impressions + (r.impressions || 0),
+    clicks: a.clicks + (r.clicks || 0), conversions: a.conversions + (r.conversions || 0),
+  }), { spend: 0, impressions: 0, clicks: 0, conversions: 0 });
+  const ctr = total.impressions > 0 ? total.clicks / total.impressions * 100 : 0;
+  const cpc = total.clicks > 0 ? total.spend / total.clicks : 0;
+  const cpa = total.conversions > 0 ? total.spend / total.conversions : 0;
+
+  document.getElementById('googleSummaryGrid').innerHTML = `
+    <div class="sc c-blue"><div class="lbl">花費</div><div class="val">${fmtM(total.spend)}</div><div class="sub">近30天</div></div>
+    <div class="sc"><div class="lbl">曝光</div><div class="val">${fmtN(total.impressions)}</div></div>
+    <div class="sc c-purple"><div class="lbl">點擊</div><div class="val">${fmtN(total.clicks)}</div><div class="sub">CTR ${fmtP(ctr)}</div></div>
+    <div class="sc"><div class="lbl">CPC</div><div class="val">${fmtM(cpc)}</div></div>
+    <div class="sc c-teal"><div class="lbl">購買次數</div><div class="val">${fmtN(total.conversions, 1)}</div></div>
+    <div class="sc"><div class="lbl">CPA</div><div class="val">${fmtM(cpa)}</div></div>`;
+}
+
+function renderGoogleTable(wrapId, nameLabel, rows) {
+  const wrap = document.getElementById(wrapId);
+  if (!wrap) return;
+  wrap.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>${nameLabel}</th><th>花費</th><th>曝光</th><th>點擊</th><th>CTR</th><th>CPC</th><th>購買<br>次數</th><th>CPA</th>
+      </tr></thead>
+      <tbody>${rows.map(r => `<tr>
+        <td><span class="cell-name" title="${r.name}">${r.name || '—'}</span></td>
+        <td>${fmtM(r.spend)}</td>
+        <td>${fmtN(r.impressions)}</td>
+        <td>${fmtN(r.clicks)}</td>
+        <td>${fmtP(r.ctr)}</td>
+        <td>${fmtM(r.cpc)}</td>
+        <td>${fmtN(r.conversions, 1)}</td>
+        <td>${fmtM(r.cpa)}</td>
+      </tr>`).join('')}
+      </tbody>
+    </table>`;
 }
 
 </script>
