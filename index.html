@@ -104,40 +104,34 @@
   <button class="tab-btn" onclick="switchTab('google', this)">🔍 Google Ads</button>
 </div>
 
+<div class="controls">
+  <div class="preset-btns">
+    <button class="preset-btn" onclick="applyPreset(1)">今天</button>
+    <button class="preset-btn" onclick="applyPresetYesterday()">昨天</button>
+    <button class="preset-btn" id="preset7" onclick="applyPreset(7)">近7天</button>
+    <button class="preset-btn" onclick="applyPreset(30)">近30天</button>
+    <button class="preset-btn" onclick="applyPreset(90)">近90天</button>
+    <button class="preset-btn" onclick="applyPresetMonth()">本月</button>
+  </div>
+  <div class="date-inputs">
+    <input type="date" id="dateFrom" onchange="clearPreset(); refreshAll(false)">
+    <span style="color:#bbb">至</span>
+    <input type="date" id="dateTo" onchange="clearPreset(); refreshAll(false)">
+  </div>
+  <button class="fetch-btn" id="fetchBtn" onclick="refreshAll(true)">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4"/></svg>
+    更新資料
+  </button>
+  <span class="status-text" id="statusText"></span>
+</div>
+
 <div class="main">
   <div class="tab-panel active" id="tab-meta-panel">
-    <div class="controls">
-      <div class="preset-btns">
-        <button class="preset-btn" onclick="applyPreset(1)">今天</button>
-        <button class="preset-btn" onclick="applyPresetYesterday()">昨天</button>
-        <button class="preset-btn" id="preset7" onclick="applyPreset(7)">近7天</button>
-        <button class="preset-btn" onclick="applyPreset(30)">近30天</button>
-        <button class="preset-btn" onclick="applyPreset(90)">近90天</button>
-        <button class="preset-btn" onclick="applyPresetMonth()">本月</button>
-      </div>
-      <div class="date-inputs">
-        <input type="date" id="dateFrom" onchange="clearPreset(); fetchData(false)">
-        <span style="color:#bbb">至</span>
-        <input type="date" id="dateTo" onchange="clearPreset(); fetchData(false)">
-      </div>
-      <button class="fetch-btn" id="fetchBtn" onclick="fetchData(true)">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4"/></svg>
-        更新資料
-      </button>
-      <span class="status-text" id="statusText"></span>
-    </div>
     <div id="tab-perf">
       <div style="text-align:center;padding:60px;color:#aaa;">點擊「更新資料」開始載入</div>
     </div>
   </div>
   <div class="tab-panel" id="tab-google-panel">
-    <div class="controls">
-      <button class="fetch-btn" id="googleFetchBtn" onclick="fetchGoogleData(true)">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4"/></svg>
-        更新資料
-      </button>
-      <span class="status-text" id="googleStatusText"></span>
-    </div>
     <div id="tab-google">
       <div style="text-align:center;padding:60px;color:#aaa;">點擊「更新資料」開始載入</div>
     </div>
@@ -151,7 +145,6 @@ let trendChart, pieChart, ageChart, ageComboChart, genderChart, genderComboChart
 let lastFilteredTrend = [];
 let lastTotal = null;
 let dateGranularity = 'day';
-let googleLoaded = false;
 let googleTrendChart, googlePieChart, googleAgeChart, googleAgeComboChart, googleGenderChart, googleGenderComboChart;
 let googleDateGranularity = 'day';
 let lastGoogleCampaignRaw = [];
@@ -164,10 +157,20 @@ function switchTab(name, btn) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   btn.classList.add('active');
   document.getElementById('tab-' + name + '-panel').classList.add('active');
-  if (name === 'google' && !googleLoaded) {
-    googleLoaded = true;
-    fetchGoogleData(false);
-    setInterval(() => fetchGoogleData(true), GOOGLE_AUTO_REFRESH_MS);
+}
+
+async function refreshAll(force = false) {
+  const btn = document.getElementById('fetchBtn');
+  const status = document.getElementById('statusText');
+  btn.disabled = true;
+  status.textContent = '載入中…'; status.className = 'status-text';
+  try {
+    await Promise.all([fetchData(force), fetchGoogleData(force)]);
+    status.textContent = '✓ 完成'; status.className = 'status-text ok';
+  } catch(e) {
+    status.textContent = `❌ ${e.message}`; status.className = 'status-text err';
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -184,21 +187,21 @@ function applyPreset(days) {
   document.getElementById('dateFrom').value = toYMD(from);
   document.getElementById('dateTo').value = toYMD(to);
   clearPreset(); event.target.classList.add('active');
-  fetchData(false);
+  refreshAll(false);
 }
 function applyPresetYesterday() {
   const d = new Date(); d.setDate(d.getDate() - 1);
   document.getElementById('dateFrom').value = toYMD(d);
   document.getElementById('dateTo').value = toYMD(d);
   clearPreset(); event.target.classList.add('active');
-  fetchData(false);
+  refreshAll(false);
 }
 function applyPresetMonth() {
   const now = new Date();
   document.getElementById('dateFrom').value = toYMD(new Date(now.getFullYear(), now.getMonth(), 1));
   document.getElementById('dateTo').value = toYMD(now);
   clearPreset(); event.target.classList.add('active');
-  fetchData(false);
+  refreshAll(false);
 }
 (function() {
   const to = new Date(), from = new Date();
@@ -206,7 +209,8 @@ function applyPresetMonth() {
   document.getElementById('dateFrom').value = toYMD(from);
   document.getElementById('dateTo').value = toYMD(to);
   document.getElementById('preset7').classList.add('active');
-  fetchData(false);
+  refreshAll(false);
+  setInterval(() => fetchGoogleData(true), GOOGLE_AUTO_REFRESH_MS);
 })();
 
 function cacheGet(key) {
@@ -234,10 +238,6 @@ function showSectionError(wrapId, e) {
 async function fetchData(force = false) {
   const since = document.getElementById('dateFrom').value;
   const until = document.getElementById('dateTo').value;
-  const btn = document.getElementById('fetchBtn');
-  const status = document.getElementById('statusText');
-  btn.disabled = true;
-  status.textContent = '載入中…'; status.className = 'status-text';
 
   renderSkeleton();
 
@@ -254,22 +254,14 @@ async function fetchData(force = false) {
   ageP.then(j => renderDemographic('age', j.data || [])).catch(e => showSectionError('ageTableWrap', e));
   genderP.then(j => renderDemographic('gender', j.data || [])).catch(e => showSectionError('genderTableWrap', e));
 
-  try {
-    const [campJson, trendJson] = await Promise.all([campP, trendP]);
-    const campData  = campJson.data || [];
-    const trendData = trendJson.data || [];
+  const [campJson, trendJson] = await Promise.all([campP, trendP]);
+  const campData  = campJson.data || [];
+  const trendData = trendJson.data || [];
 
-    renderCore(campData, trendData, since, until);
+  renderCore(campData, trendData, since, until);
 
-    const updatedAt = campJson.updated || new Date().toLocaleString('zh-TW');
-    document.getElementById('lastUpdate').textContent = updatedAt + (campJson.cached ? '（快取）' : '');
-    status.textContent = `✓ 完成・${campData.length} campaigns`;
-    status.className = 'status-text ok';
-  } catch(e) {
-    status.textContent = `❌ ${e.message}`; status.className = 'status-text err';
-  } finally {
-    btn.disabled = false;
-  }
+  const updatedAt = campJson.updated || new Date().toLocaleString('zh-TW');
+  document.getElementById('lastUpdate').textContent = updatedAt + (campJson.cached ? '（快取）' : '');
 }
 
 function fmtN(n, d=0) { if (n == null || isNaN(n)) return '<span class="na">—</span>'; return (+n).toLocaleString('zh-TW',{minimumFractionDigits:d,maximumFractionDigits:d}); }
@@ -699,12 +691,13 @@ function renderGoogleSkeleton() {
     </div>`;
 }
 
-async function fetchGoogleData(force = false) {
-  const btn = document.getElementById('googleFetchBtn');
-  const status = document.getElementById('googleStatusText');
-  btn.disabled = true;
-  status.textContent = '載入中…'; status.className = 'status-text';
+function filterGoogleByRange(rows) {
+  const since = document.getElementById('dateFrom').value;
+  const until = document.getElementById('dateTo').value;
+  return rows.filter(r => !r.date_start || (r.date_start >= since && r.date_start <= until));
+}
 
+async function fetchGoogleData(force = false) {
   renderGoogleSkeleton();
 
   const base = `${API_BASE}/api/google_insights`;
@@ -718,25 +711,18 @@ async function fetchGoogleData(force = false) {
        .catch(e => showSectionError('googleHeadlineWrap', e));
   descP.then(j => { lastGoogleDescriptionRaw = j.data || []; populateGoogleCampFilter('description'); renderGoogleAssetTable('description'); })
        .catch(e => showSectionError('googleDescriptionWrap', e));
+  // Age/gender sheets only hold whole-window totals (no per-day breakdown), so they
+  // aren't affected by the shared date filter.
   ageP.then(j => renderGoogleDemographic('Age', j.data || [])).catch(e => showSectionError('googleAgeTableWrap', e));
   genderP.then(j => renderGoogleDemographic('Gender', j.data || [])).catch(e => showSectionError('googleGenderTableWrap', e));
 
-  try {
-    const campJson = await campP;
-    lastGoogleCampaignRaw = campJson.data || [];
-    const agg = aggregateGoogleRows(lastGoogleCampaignRaw);
-    renderGoogleSummary(agg);
-    renderGoogleCampaignPie(agg);
-    renderGoogleTable('googleCampaignWrap', '廣告活動', agg);
-    renderGoogleDateTable();
-
-    status.textContent = `✓ 完成` + (campJson.updated ? `・${campJson.updated}` : '') + (campJson.cached ? '（快取）' : '');
-    status.className = 'status-text ok';
-  } catch(e) {
-    status.textContent = `❌ ${e.message}`; status.className = 'status-text err';
-  } finally {
-    btn.disabled = false;
-  }
+  const campJson = await campP;
+  lastGoogleCampaignRaw = campJson.data || [];
+  const agg = aggregateGoogleRows(filterGoogleByRange(lastGoogleCampaignRaw));
+  renderGoogleSummary(agg);
+  renderGoogleCampaignPie(agg);
+  renderGoogleTable('googleCampaignWrap', '廣告活動', agg);
+  renderGoogleDateTable();
 }
 
 function aggregateGoogleRows(rows) {
@@ -810,7 +796,7 @@ function setGoogleGranularity(g) {
 function renderGoogleDateTable() {
   const wrap = document.getElementById('googleDateTableWrap');
   if (!wrap) return;
-  const periods = aggregateGoogleByPeriod(lastGoogleCampaignRaw, googleDateGranularity);
+  const periods = aggregateGoogleByPeriod(filterGoogleByRange(lastGoogleCampaignRaw), googleDateGranularity);
   const total = finalizeGooglePeriod(periods.reduce((a, r) => ({
     spend: a.spend + (r.spend||0), impressions: a.impressions + (r.impressions||0),
     clicks: a.clicks + (r.clicks||0), conversions: a.conversions + (r.conversions||0),
@@ -854,8 +840,10 @@ function renderGoogleSummary(agg) {
   const cpc = total.clicks > 0 ? total.spend / total.clicks : 0;
   const cpa = total.conversions > 0 ? total.spend / total.conversions : 0;
 
+  const since = document.getElementById('dateFrom').value;
+  const until = document.getElementById('dateTo').value;
   document.getElementById('googleSummaryGrid').innerHTML = `
-    <div class="sc c-blue"><div class="lbl">花費</div><div class="val">${fmtM(total.spend)}</div><div class="sub">近30天</div></div>
+    <div class="sc c-blue"><div class="lbl">花費</div><div class="val">${fmtM(total.spend)}</div><div class="sub">${since} ～ ${until}</div></div>
     <div class="sc"><div class="lbl">曝光</div><div class="val">${fmtN(total.impressions)}</div></div>
     <div class="sc c-purple"><div class="lbl">點擊</div><div class="val">${fmtN(total.clicks)}</div><div class="sub">CTR ${fmtP(ctr)}</div></div>
     <div class="sc"><div class="lbl">CPC</div><div class="val">${fmtM(cpc)}</div></div>
@@ -873,7 +861,7 @@ function renderGoogleCampaignPie(agg) {
   });
 
   if (googleTrendChart) googleTrendChart.destroy();
-  const daily = aggregateGoogleByPeriod(lastGoogleCampaignRaw, 'day');
+  const daily = aggregateGoogleByPeriod(filterGoogleByRange(lastGoogleCampaignRaw), 'day');
   googleTrendChart = new Chart(document.getElementById('googleTrendChart'), {
     data: { labels: daily.map(r => r.date_start), datasets: [
       { type: 'bar',  label: '花費', data: daily.map(r => r.spend || 0), backgroundColor: 'rgba(22,119,255,0.25)', borderColor: '#1677ff', borderWidth: 1, yAxisID: 'y', borderRadius: 3 },
@@ -902,7 +890,8 @@ function renderGoogleAssetTable(kind) {
   const raw = isHeadline ? lastGoogleHeadlineRaw : lastGoogleDescriptionRaw;
   const filterSel = document.getElementById(`google${isHeadline ? 'Headline' : 'Description'}CampFilter`);
   const campFilter = filterSel ? filterSel.value : '';
-  const filtered = campFilter ? raw.filter(r => r.campaign_name === campFilter) : raw;
+  let filtered = filterGoogleByRange(raw);
+  if (campFilter) filtered = filtered.filter(r => r.campaign_name === campFilter);
   const agg = aggregateGoogleRows(filtered).slice(0, 10);
   renderGoogleTable(isHeadline ? 'googleHeadlineWrap' : 'googleDescriptionWrap', isHeadline ? '標題' : '文案', agg);
 }
