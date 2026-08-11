@@ -159,6 +159,9 @@ let googleDateGranularity = 'day';
 let lastGoogleCampaignRaw = [];
 let lastGoogleHeadlineRaw = [];
 let lastGoogleDescriptionRaw = [];
+let gadsTestTrendChart, gadsTestPieChart;
+let gadsTestDateGranularity = 'day';
+let lastGadsTestRaw = [];
 const GOOGLE_AUTO_REFRESH_MS = 15 * 60 * 1000; // Google Ads 指令碼每小時跑一次，15分鐘輪詢一次確保拿到新資料
 
 function switchTab(name, btn) {
@@ -997,10 +1000,6 @@ function renderGoogleDemographic(kind, rows) {
 // ── Google Ads API 直連測試分頁 ──────────────────────────────
 // 跟上面 Sheet 版本並存比對，同一組日期範圍、同一套聚合/渲染邏輯（aggregateGoogleRows /
 // aggregateGoogleByPeriod / renderGoogleTable 直接沿用）。確認數字一致後移除 Sheet 那條路線。
-let gadsTestTrendChart, gadsTestPieChart;
-let gadsTestDateGranularity = 'day';
-let lastGadsTestRaw = [];
-
 function renderGadsTestSkeleton() {
   document.getElementById('tab-gadsTest').innerHTML = `
     <div class="summary-grid" id="gadsTestSummaryGrid">${loadingCards(6)}</div>
