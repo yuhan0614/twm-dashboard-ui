@@ -47,6 +47,10 @@
   .sc .lbl { font-size: 11px; color: #65676b; font-weight: 500; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px; }
   .sc .val { font-size: 22px; font-weight: 700; }
   .sc .sub { font-size: 11px; color: #999; margin-top: 3px; }
+  .sc .delta { font-size: 12px; font-weight: 600; margin-top: 4px; }
+  .sc .delta.up { color: #52c41a; }
+  .sc .delta.down { color: #f5222d; }
+  .sc .delta.flat { color: #999; font-weight: 500; }
   .c-blue .val { color: #1677ff; }
   .c-orange .val { color: #fa8c16; }
   .c-purple .val { color: #722ed1; }
@@ -181,6 +185,37 @@ function toYMD(d) {
   const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
   return `${y}-${m}-${day}`;
 }
+
+// Immediately-preceding period of the same length, used for period-over-period (+/-) comparison.
+function prevPeriodRange(since, until) {
+  const s = new Date(since + 'T00:00:00');
+  const u = new Date(until + 'T00:00:00');
+  const days = Math.round((u - s) / 86400000) + 1;
+  const prevUntil = new Date(s); prevUntil.setDate(prevUntil.getDate() - 1);
+  const prevSince = new Date(prevUntil); prevSince.setDate(prevSince.getDate() - (days - 1));
+  return { since: toYMD(prevSince), until: toYMD(prevUntil) };
+}
+
+// Sums the given numeric fields across rows — used to total both the current and previous period.
+function sumFields(rows, fields) {
+  const total = {};
+  fields.forEach(f => total[f] = 0);
+  for (const r of rows) fields.forEach(f => total[f] += (r[f] || 0));
+  return total;
+}
+
+// Renders a small "+/-X.X%" line vs. the previous period. `invert` marks cost-per-x metrics
+// (CPA/CPC/CPLC/CPM) where a decrease is the good direction, so green/red flip accordingly.
+function deltaHtml(curr, prev, invert = false) {
+  if (prev == null || !isFinite(prev) || prev === 0 || curr == null || !isFinite(curr)) return '';
+  const pct = (curr - prev) / Math.abs(prev) * 100;
+  if (!isFinite(pct)) return '';
+  const flat = Math.abs(pct) < 0.05;
+  const good = invert ? pct < 0 : pct > 0;
+  const cls = flat ? 'flat' : (good ? 'up' : 'down');
+  const sign = pct > 0 ? '+' : '';
+  return `<div class="delta ${cls}">${sign}${pct.toFixed(1)}% <span style="font-weight:400;color:#bbb;">前期</span></div>`;
+}
 function clearPreset() {
   document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
 }
@@ -251,17 +286,22 @@ async function fetchData(force = false) {
   const ageP    = cachedFetchJson(`${base}&level=account&breakdowns=age`, force);
   const genderP = cachedFetchJson(`${base}&level=account&breakdowns=gender`, force);
 
+  const prev = prevPeriodRange(since, until);
+  const prevBase = `${API_BASE}/api/insights?accounts=${ACCOUNT_ID}&since=${prev.since}&until=${prev.until}`;
+  const prevCampP = cachedFetchJson(`${prevBase}&level=campaign`, force).catch(() => ({ data: [] }));
+
   // Progressive rendering: each section paints as soon as its own fetch resolves,
   // instead of the whole page waiting on the slowest of five calls.
   adsetP.then(j => renderAudience(j.data || [])).catch(e => showSectionError('adsetTableWrap', e));
   ageP.then(j => renderDemographic('age', j.data || [])).catch(e => showSectionError('ageTableWrap', e));
   genderP.then(j => renderDemographic('gender', j.data || [])).catch(e => showSectionError('genderTableWrap', e));
 
-  const [campJson, trendJson] = await Promise.all([campP, trendP]);
+  const [campJson, trendJson, prevCampJson] = await Promise.all([campP, trendP, prevCampP]);
   const campData  = campJson.data || [];
   const trendData = trendJson.data || [];
+  const prevCampData = prevCampJson.data || [];
 
-  renderCore(campData, trendData, since, until);
+  renderCore(campData, trendData, since, until, prevCampData);
 
   const updatedAt = campJson.updated || new Date().toLocaleString('zh-TW');
   document.getElementById('lastUpdate').textContent = updatedAt + (campJson.cached ? '（快取）' : '');
@@ -354,37 +394,36 @@ function renderSkeleton() {
     </div>`;
 }
 
-function renderCore(camps, trend, since, until) {
-  const total = camps.reduce((a,r) => ({
-    spend: a.spend+(r.spend||0), impressions: a.impressions+(r.impressions||0),
-    link_clicks: a.link_clicks+(r.link_clicks||0), view_content: a.view_content+(r.view_content||0),
-    purchase: a.purchase+(r.purchase||0),
-    netflix_purchase: a.netflix_purchase+(r.netflix_purchase||0),
-    max_purchase: a.max_purchase+(r.max_purchase||0),
-    newdp_purchase: a.newdp_purchase+(r.newdp_purchase||0),
-    prime_purchase: a.prime_purchase+(r.prime_purchase||0),
-    ott_purchase: a.ott_purchase+(r.ott_purchase||0),
-  }), {spend:0,impressions:0,link_clicks:0,view_content:0,purchase:0,netflix_purchase:0,max_purchase:0,newdp_purchase:0,prime_purchase:0,ott_purchase:0});
+const CORE_TOTAL_FIELDS = ['spend','impressions','link_clicks','view_content','purchase',
+  'netflix_purchase','max_purchase','newdp_purchase','prime_purchase','ott_purchase'];
+
+function renderCore(camps, trend, since, until, prevCamps = []) {
+  const total = sumFields(camps, CORE_TOTAL_FIELDS);
   const cpa  = total.purchase > 0 ? total.spend/total.purchase : 0;
   const cplc = total.link_clicks > 0 ? total.spend/total.link_clicks : 0;
   const cpm  = total.impressions > 0 ? total.spend/total.impressions*1000 : 0;
 
+  const prevTotal = sumFields(prevCamps, CORE_TOTAL_FIELDS);
+  const prevCpa  = prevTotal.purchase > 0 ? prevTotal.spend/prevTotal.purchase : 0;
+  const prevCplc = prevTotal.link_clicks > 0 ? prevTotal.spend/prevTotal.link_clicks : 0;
+  const prevCpm  = prevTotal.impressions > 0 ? prevTotal.spend/prevTotal.impressions*1000 : 0;
+
   document.getElementById('summaryGrid').innerHTML = `
-    <div class="sc c-blue"><div class="lbl">花費</div><div class="val">${fmtM(total.spend)}</div><div class="sub">${since} ～ ${until}</div></div>
-    <div class="sc"><div class="lbl">曝光</div><div class="val">${(total.impressions/10000).toFixed(1)}萬</div><div class="sub">${total.impressions.toLocaleString()}</div></div>
-    <div class="sc c-purple"><div class="lbl">連結點擊</div><div class="val">${total.link_clicks.toLocaleString()}</div><div class="sub">CTR ${fmtP(total.impressions?total.link_clicks/total.impressions*100:0)}</div></div>
-    <div class="sc"><div class="lbl">CPLC</div><div class="val">${fmtM(cplc)}</div><div class="sub">花費 / 連結點擊</div></div>
-    <div class="sc"><div class="lbl">CPM</div><div class="val">${fmtM(cpm)}</div><div class="sub">每千次曝光成本</div></div>
-    <div class="sc c-orange"><div class="lbl">Apply頁面</div><div class="val">${Math.round(total.view_content).toLocaleString()}</div><div class="sub">內容瀏覽次數</div></div>
-    <div class="sc c-teal"><div class="lbl">購買</div><div class="val">${Math.round(total.purchase).toLocaleString()}</div><div class="sub">Purchase</div></div>
-    <div class="sc"><div class="lbl">CPA（購買）</div><div class="val">${fmtM(cpa)}</div><div class="sub">Cost per Purchase</div></div>`;
+    <div class="sc c-blue"><div class="lbl">花費</div><div class="val">${fmtM(total.spend)}</div><div class="sub">${since} ～ ${until}</div>${deltaHtml(total.spend, prevTotal.spend)}</div>
+    <div class="sc"><div class="lbl">曝光</div><div class="val">${(total.impressions/10000).toFixed(1)}萬</div><div class="sub">${total.impressions.toLocaleString()}</div>${deltaHtml(total.impressions, prevTotal.impressions)}</div>
+    <div class="sc c-purple"><div class="lbl">連結點擊</div><div class="val">${total.link_clicks.toLocaleString()}</div><div class="sub">CTR ${fmtP(total.impressions?total.link_clicks/total.impressions*100:0)}</div>${deltaHtml(total.link_clicks, prevTotal.link_clicks)}</div>
+    <div class="sc"><div class="lbl">CPLC</div><div class="val">${fmtM(cplc)}</div><div class="sub">花費 / 連結點擊</div>${deltaHtml(cplc, prevCplc, true)}</div>
+    <div class="sc"><div class="lbl">CPM</div><div class="val">${fmtM(cpm)}</div><div class="sub">每千次曝光成本</div>${deltaHtml(cpm, prevCpm, true)}</div>
+    <div class="sc c-orange"><div class="lbl">Apply頁面</div><div class="val">${Math.round(total.view_content).toLocaleString()}</div><div class="sub">內容瀏覽次數</div>${deltaHtml(total.view_content, prevTotal.view_content)}</div>
+    <div class="sc c-teal"><div class="lbl">購買</div><div class="val">${Math.round(total.purchase).toLocaleString()}</div><div class="sub">Purchase</div>${deltaHtml(total.purchase, prevTotal.purchase)}</div>
+    <div class="sc"><div class="lbl">CPA（購買）</div><div class="val">${fmtM(cpa)}</div><div class="sub">Cost per Purchase</div>${deltaHtml(cpa, prevCpa, true)}</div>`;
 
   document.getElementById('productGrid').innerHTML = `
-    <div class="sc c-pink"><div class="lbl">Netflix_Purchase</div><div class="val">${Math.round(total.netflix_purchase).toLocaleString()}</div></div>
-    <div class="sc c-pink"><div class="lbl">Max_Purchase</div><div class="val">${Math.round(total.max_purchase).toLocaleString()}</div></div>
-    <div class="sc c-pink"><div class="lbl">NewDP_Purchase</div><div class="val">${Math.round(total.newdp_purchase).toLocaleString()}</div></div>
-    <div class="sc c-pink"><div class="lbl">Prime_Purchase</div><div class="val">${Math.round(total.prime_purchase).toLocaleString()}</div></div>
-    <div class="sc c-pink"><div class="lbl">OTT_Purchase</div><div class="val">${Math.round(total.ott_purchase).toLocaleString()}</div></div>`;
+    <div class="sc c-pink"><div class="lbl">Netflix_Purchase</div><div class="val">${Math.round(total.netflix_purchase).toLocaleString()}</div>${deltaHtml(total.netflix_purchase, prevTotal.netflix_purchase)}</div>
+    <div class="sc c-pink"><div class="lbl">Max_Purchase</div><div class="val">${Math.round(total.max_purchase).toLocaleString()}</div>${deltaHtml(total.max_purchase, prevTotal.max_purchase)}</div>
+    <div class="sc c-pink"><div class="lbl">NewDP_Purchase</div><div class="val">${Math.round(total.newdp_purchase).toLocaleString()}</div>${deltaHtml(total.newdp_purchase, prevTotal.newdp_purchase)}</div>
+    <div class="sc c-pink"><div class="lbl">Prime_Purchase</div><div class="val">${Math.round(total.prime_purchase).toLocaleString()}</div>${deltaHtml(total.prime_purchase, prevTotal.prime_purchase)}</div>
+    <div class="sc c-pink"><div class="lbl">OTT_Purchase</div><div class="val">${Math.round(total.ott_purchase).toLocaleString()}</div>${deltaHtml(total.ott_purchase, prevTotal.ott_purchase)}</div>`;
 
   lastFilteredTrend = trend.filter(r => r.date_start >= since && r.date_start <= until);
   lastTotal = total;
@@ -788,6 +827,10 @@ async function fetchGadsTestData(force = false) {
   const ageP   = cachedFetchJson(`${base}&report=age`, force);
   const genderP = cachedFetchJson(`${base}&report=gender`, force);
 
+  const prev = prevPeriodRange(since, until);
+  const prevBase = `${API_BASE}/api/google_ads_direct?since=${prev.since}&until=${prev.until}`;
+  const prevCampP = cachedFetchJson(`${prevBase}&report=campaign`, force).catch(() => ({ data: [] }));
+
   headP.then(j => { lastGadsTestHeadlineRaw = j.data || []; populateGadsTestCampFilter('headline'); renderGadsTestAssetTable('headline'); })
        .catch(e => showSectionError('gadsTestHeadlineWrap', e));
   descP.then(j => { lastGadsTestDescriptionRaw = j.data || []; populateGadsTestCampFilter('description'); renderGadsTestAssetTable('description'); })
@@ -795,10 +838,11 @@ async function fetchGadsTestData(force = false) {
   ageP.then(j => renderGadsTestDemographic('Age', j.data || [])).catch(e => showSectionError('gadsTestAgeTableWrap', e));
   genderP.then(j => renderGadsTestDemographic('Gender', j.data || [])).catch(e => showSectionError('gadsTestGenderTableWrap', e));
 
-  const json = await campP;
+  const [json, prevJson] = await Promise.all([campP, prevCampP]);
   lastGadsTestRaw = json.data || [];
   const agg = aggregateGoogleRows(lastGadsTestRaw);
-  renderGadsTestSummary(agg, since, until);
+  const prevAgg = aggregateGoogleRows(prevJson.data || []);
+  renderGadsTestSummary(agg, since, until, prevAgg);
   renderGadsTestCampaignPie(agg);
   renderGoogleTable('gadsTestCampaignWrap', '廣告活動', agg);
   renderGadsTestDateTable();
@@ -887,22 +931,25 @@ function renderGadsTestDemographic(kind, rows) {
   else       { gadsTestGenderChart = doughnut; gadsTestGenderComboChart = combo; }
 }
 
-function renderGadsTestSummary(agg, since, until) {
-  const total = agg.reduce((a, r) => ({
-    spend: a.spend + (r.spend || 0), impressions: a.impressions + (r.impressions || 0),
-    clicks: a.clicks + (r.clicks || 0), conversions: a.conversions + (r.conversions || 0),
-  }), { spend: 0, impressions: 0, clicks: 0, conversions: 0 });
+const GADS_TOTAL_FIELDS = ['spend', 'impressions', 'clicks', 'conversions'];
+
+function renderGadsTestSummary(agg, since, until, prevAgg = []) {
+  const total = sumFields(agg, GADS_TOTAL_FIELDS);
   const ctr = total.impressions > 0 ? total.clicks / total.impressions * 100 : 0;
   const cpc = total.clicks > 0 ? total.spend / total.clicks : 0;
   const cpa = total.conversions > 0 ? total.spend / total.conversions : 0;
 
+  const prevTotal = sumFields(prevAgg, GADS_TOTAL_FIELDS);
+  const prevCpc = prevTotal.clicks > 0 ? prevTotal.spend / prevTotal.clicks : 0;
+  const prevCpa = prevTotal.conversions > 0 ? prevTotal.spend / prevTotal.conversions : 0;
+
   document.getElementById('gadsTestSummaryGrid').innerHTML = `
-    <div class="sc c-blue"><div class="lbl">花費</div><div class="val">${fmtM(total.spend)}</div><div class="sub">${since} ～ ${until}</div></div>
-    <div class="sc"><div class="lbl">曝光</div><div class="val">${fmtN(total.impressions)}</div></div>
-    <div class="sc c-purple"><div class="lbl">點擊</div><div class="val">${fmtN(total.clicks)}</div><div class="sub">CTR ${fmtP(ctr)}</div></div>
-    <div class="sc"><div class="lbl">CPC</div><div class="val">${fmtM(cpc)}</div></div>
-    <div class="sc c-teal"><div class="lbl">購買次數</div><div class="val">${fmtN(total.conversions)}</div></div>
-    <div class="sc"><div class="lbl">CPA</div><div class="val">${fmtM(cpa)}</div></div>`;
+    <div class="sc c-blue"><div class="lbl">花費</div><div class="val">${fmtM(total.spend)}</div><div class="sub">${since} ～ ${until}</div>${deltaHtml(total.spend, prevTotal.spend)}</div>
+    <div class="sc"><div class="lbl">曝光</div><div class="val">${fmtN(total.impressions)}</div>${deltaHtml(total.impressions, prevTotal.impressions)}</div>
+    <div class="sc c-purple"><div class="lbl">點擊</div><div class="val">${fmtN(total.clicks)}</div><div class="sub">CTR ${fmtP(ctr)}</div>${deltaHtml(total.clicks, prevTotal.clicks)}</div>
+    <div class="sc"><div class="lbl">CPC</div><div class="val">${fmtM(cpc)}</div>${deltaHtml(cpc, prevCpc, true)}</div>
+    <div class="sc c-teal"><div class="lbl">購買次數</div><div class="val">${fmtN(total.conversions)}</div>${deltaHtml(total.conversions, prevTotal.conversions)}</div>
+    <div class="sc"><div class="lbl">CPA</div><div class="val">${fmtM(cpa)}</div>${deltaHtml(cpa, prevCpa, true)}</div>`;
 }
 
 function renderGadsTestCampaignPie(agg) {
