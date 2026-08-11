@@ -104,6 +104,7 @@
 <div class="tabs">
   <button class="tab-btn active" onclick="switchTab('meta', this)">📊 Meta 成效</button>
   <button class="tab-btn" onclick="switchTab('google', this)">🔍 Google Ads</button>
+  <button class="tab-btn" onclick="switchTab('gadsTest', this)">🧪 Google Ads（API 測試）</button>
 </div>
 
 <div class="controls">
@@ -139,6 +140,11 @@
       <div style="text-align:center;padding:60px;color:#aaa;">點擊「更新資料」開始載入</div>
     </div>
   </div>
+  <div class="tab-panel" id="tab-gadsTest-panel">
+    <div id="tab-gadsTest">
+      <div style="text-align:center;padding:60px;color:#aaa;">點擊「更新資料」開始載入</div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -168,7 +174,7 @@ async function refreshAll(force = false) {
   btn.disabled = true;
   status.textContent = '載入中…'; status.className = 'status-text';
   try {
-    await Promise.all([fetchData(force), fetchGoogleData(force)]);
+    await Promise.all([fetchData(force), fetchGoogleData(force), fetchGadsTestData(force)]);
     status.textContent = '✓ 完成'; status.className = 'status-text ok';
   } catch(e) {
     status.textContent = `❌ ${e.message}`; status.className = 'status-text err';
@@ -986,6 +992,150 @@ function renderGoogleDemographic(kind, rows) {
 
   if (isAge) { googleAgeChart = doughnut; googleAgeComboChart = combo; }
   else       { googleGenderChart = doughnut; googleGenderComboChart = combo; }
+}
+
+// ── Google Ads API 直連測試分頁 ──────────────────────────────
+// 跟上面 Sheet 版本並存比對，同一組日期範圍、同一套聚合/渲染邏輯（aggregateGoogleRows /
+// aggregateGoogleByPeriod / renderGoogleTable 直接沿用）。確認數字一致後移除 Sheet 那條路線。
+let gadsTestTrendChart, gadsTestPieChart;
+let gadsTestDateGranularity = 'day';
+let lastGadsTestRaw = [];
+
+function renderGadsTestSkeleton() {
+  document.getElementById('tab-gadsTest').innerHTML = `
+    <div class="summary-grid" id="gadsTestSummaryGrid">${loadingCards(6)}</div>
+    <div class="charts-row">
+      <div class="chart-card">
+        <h3>📅 每日趨勢</h3>
+        <div class="chart-wrap"><canvas id="gadsTestTrendChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>📊 活動佔比</h3>
+        <div class="chart-wrap"><canvas id="gadsTestPieChart"></canvas></div>
+      </div>
+    </div>
+    <div class="table-card">
+      <div class="table-header">
+        <h3>📅 每日成效</h3>
+        <div class="table-header-right">
+          <div class="preset-btns">
+            <button class="preset-btn ${gadsTestDateGranularity==='day'?'active':''}" onclick="setGadsTestGranularity('day')">日</button>
+            <button class="preset-btn ${gadsTestDateGranularity==='week'?'active':''}" onclick="setGadsTestGranularity('week')">週</button>
+            <button class="preset-btn ${gadsTestDateGranularity==='month'?'active':''}" onclick="setGadsTestGranularity('month')">月</button>
+          </div>
+        </div>
+      </div>
+      <div class="table-wrap" id="gadsTestDateTableWrap">${loadingPlaceholder()}</div>
+    </div>
+    <div class="table-card">
+      <div class="table-header"><h3>🎯 依廣告活動</h3></div>
+      <div class="table-wrap" id="gadsTestCampaignWrap">${loadingPlaceholder()}</div>
+    </div>`;
+}
+
+async function fetchGadsTestData(force = false) {
+  const since = document.getElementById('dateFrom').value;
+  const until = document.getElementById('dateTo').value;
+  renderGadsTestSkeleton();
+
+  const url = `${API_BASE}/api/google_ads_direct?since=${since}&until=${until}`;
+  const json = await cachedFetchJson(url, force);
+  lastGadsTestRaw = json.data || [];
+
+  const agg = aggregateGoogleRows(lastGadsTestRaw);
+  renderGadsTestSummary(agg, since, until);
+  renderGadsTestCampaignPie(agg);
+  renderGoogleTable('gadsTestCampaignWrap', '廣告活動', agg);
+  renderGadsTestDateTable();
+}
+
+function renderGadsTestSummary(agg, since, until) {
+  const total = agg.reduce((a, r) => ({
+    spend: a.spend + (r.spend || 0), impressions: a.impressions + (r.impressions || 0),
+    clicks: a.clicks + (r.clicks || 0), conversions: a.conversions + (r.conversions || 0),
+  }), { spend: 0, impressions: 0, clicks: 0, conversions: 0 });
+  const ctr = total.impressions > 0 ? total.clicks / total.impressions * 100 : 0;
+  const cpc = total.clicks > 0 ? total.spend / total.clicks : 0;
+  const cpa = total.conversions > 0 ? total.spend / total.conversions : 0;
+
+  document.getElementById('gadsTestSummaryGrid').innerHTML = `
+    <div class="sc c-blue"><div class="lbl">花費</div><div class="val">${fmtM(total.spend)}</div><div class="sub">${since} ～ ${until}</div></div>
+    <div class="sc"><div class="lbl">曝光</div><div class="val">${fmtN(total.impressions)}</div></div>
+    <div class="sc c-purple"><div class="lbl">點擊</div><div class="val">${fmtN(total.clicks)}</div><div class="sub">CTR ${fmtP(ctr)}</div></div>
+    <div class="sc"><div class="lbl">CPC</div><div class="val">${fmtM(cpc)}</div></div>
+    <div class="sc c-teal"><div class="lbl">購買次數</div><div class="val">${fmtN(total.conversions)}</div></div>
+    <div class="sc"><div class="lbl">CPA</div><div class="val">${fmtM(cpa)}</div></div>`;
+}
+
+function renderGadsTestCampaignPie(agg) {
+  if (gadsTestPieChart) gadsTestPieChart.destroy();
+  const PIE_COLORS = ['#1677ff','#fa8c16','#52c41a','#eb2f96','#722ed1','#13c2c2','#fadb14','#f5222d'];
+  gadsTestPieChart = new Chart(document.getElementById('gadsTestPieChart'), {
+    type: 'doughnut',
+    data: { labels: agg.map(r => r.name.slice(0,16)), datasets: [{ data: agg.map(r => r.spend), backgroundColor: PIE_COLORS, borderWidth: 2, borderColor: 'white' }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { font: { size: 10 }, boxWidth: 10, padding: 6 } } } }
+  });
+
+  if (gadsTestTrendChart) gadsTestTrendChart.destroy();
+  const daily = aggregateGoogleByPeriod(lastGadsTestRaw, 'day');
+  gadsTestTrendChart = new Chart(document.getElementById('gadsTestTrendChart'), {
+    data: { labels: daily.map(r => r.date_start), datasets: [
+      { type: 'bar',  label: '花費', data: daily.map(r => r.spend || 0), backgroundColor: 'rgba(22,119,255,0.25)', borderColor: '#1677ff', borderWidth: 1, yAxisID: 'y', borderRadius: 3 },
+      { type: 'line', label: '購買次數', data: daily.map(r => r.conversions || 0), borderColor: '#fa8c16', borderWidth: 2, pointRadius: 2, tension: 0.3, yAxisID: 'y3' },
+    ]},
+    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { display: false } },
+      scales: {
+        x:  { grid: { display: false }, ticks: { font: { size: 10 }, maxTicksLimit: 10 } },
+        y:  { position: 'left',  beginAtZero: true, grid: { color: '#f0f2f5' }, ticks: { callback: v=>'NT$'+Math.round(v/1000)+'K', font: { size: 10 } } },
+        y3: { position: 'right', beginAtZero: true, grid: { display: false }, ticks: { font: { size: 10 } } },
+      }
+    }
+  });
+}
+
+function setGadsTestGranularity(g) {
+  gadsTestDateGranularity = g;
+  document.querySelectorAll('#tab-gadsTest .table-header-right .preset-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  renderGadsTestDateTable();
+}
+
+function renderGadsTestDateTable() {
+  const wrap = document.getElementById('gadsTestDateTableWrap');
+  if (!wrap) return;
+  const periods = aggregateGoogleByPeriod(lastGadsTestRaw, gadsTestDateGranularity);
+  const total = finalizeGooglePeriod(periods.reduce((a, r) => ({
+    spend: a.spend + (r.spend||0), impressions: a.impressions + (r.impressions||0),
+    clicks: a.clicks + (r.clicks||0), conversions: a.conversions + (r.conversions||0),
+  }), { spend:0, impressions:0, clicks:0, conversions:0 }));
+
+  wrap.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>日期</th><th>花費</th><th>曝光</th><th>點擊</th><th>CTR</th><th>CPC</th><th>購買<br>次數</th><th>CPA</th>
+      </tr></thead>
+      <tbody>${periods.map(r => `<tr>
+        <td><span class="cell-name">${r.label}</span></td>
+        <td>${fmtM(r.spend)}</td>
+        <td>${fmtN(r.impressions)}</td>
+        <td>${fmtN(r.clicks)}</td>
+        <td>${fmtP(r.ctr)}</td>
+        <td>${fmtM(r.cpc)}</td>
+        <td>${fmtN(r.conversions)}</td>
+        <td>${fmtM(r.cpa)}</td>
+      </tr>`).join('')}
+      <tr style="background:#f0f4ff;font-weight:700;border-top:2px solid #d0d9f0;">
+        <td>合計</td>
+        <td>${fmtM(total.spend)}</td>
+        <td>${fmtN(total.impressions)}</td>
+        <td>${fmtN(total.clicks)}</td>
+        <td>${fmtP(total.ctr)}</td>
+        <td>${fmtM(total.cpc)}</td>
+        <td>${fmtN(total.conversions)}</td>
+        <td>${fmtM(total.cpa)}</td>
+      </tr>
+      </tbody>
+    </table>`;
 }
 
 </script>
