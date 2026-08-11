@@ -159,9 +159,11 @@ let googleDateGranularity = 'day';
 let lastGoogleCampaignRaw = [];
 let lastGoogleHeadlineRaw = [];
 let lastGoogleDescriptionRaw = [];
-let gadsTestTrendChart, gadsTestPieChart;
+let gadsTestTrendChart, gadsTestPieChart, gadsTestAgeChart, gadsTestAgeComboChart, gadsTestGenderChart, gadsTestGenderComboChart;
 let gadsTestDateGranularity = 'day';
 let lastGadsTestRaw = [];
+let lastGadsTestHeadlineRaw = [];
+let lastGadsTestDescriptionRaw = [];
 const GOOGLE_AUTO_REFRESH_MS = 15 * 60 * 1000; // Google Ads 指令碼每小時跑一次，15分鐘輪詢一次確保拿到新資料
 
 function switchTab(name, btn) {
@@ -1029,6 +1031,54 @@ function renderGadsTestSkeleton() {
     <div class="table-card">
       <div class="table-header"><h3>🎯 依廣告活動</h3></div>
       <div class="table-wrap" id="gadsTestCampaignWrap">${loadingPlaceholder()}</div>
+    </div>
+    <div class="table-card">
+      <div class="table-header">
+        <h3>📝 依標題</h3>
+        <div class="table-header-right">
+          <select class="filter-select" id="gadsTestHeadlineCampFilter" onchange="renderGadsTestAssetTable('headline')"><option value="">所有廣告活動</option></select>
+          <span style="font-size:12px;color:#aaa;">依花費顯示前 10 筆</span>
+        </div>
+      </div>
+      <div class="table-wrap" id="gadsTestHeadlineWrap">${loadingPlaceholder()}</div>
+    </div>
+    <div class="table-card">
+      <div class="table-header">
+        <h3>💬 依文案</h3>
+        <div class="table-header-right">
+          <select class="filter-select" id="gadsTestDescriptionCampFilter" onchange="renderGadsTestAssetTable('description')"><option value="">所有廣告活動</option></select>
+          <span style="font-size:12px;color:#aaa;">依花費顯示前 10 筆</span>
+        </div>
+      </div>
+      <div class="table-wrap" id="gadsTestDescriptionWrap">${loadingPlaceholder()}</div>
+    </div>
+    <div class="charts-row charts-row-rev">
+      <div class="chart-card">
+        <h3>🎂 花費分佈（年齡）</h3>
+        <div class="chart-wrap"><canvas id="gadsTestAgeChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>📊 花費／購買次數（年齡）</h3>
+        <div class="chart-wrap"><canvas id="gadsTestAgeComboChart"></canvas></div>
+      </div>
+    </div>
+    <div class="table-card">
+      <div class="table-header"><h3>🎂 年齡分析</h3></div>
+      <div class="table-wrap" id="gadsTestAgeTableWrap">${loadingPlaceholder()}</div>
+    </div>
+    <div class="charts-row charts-row-rev">
+      <div class="chart-card">
+        <h3>🚻 花費分佈（性別）</h3>
+        <div class="chart-wrap"><canvas id="gadsTestGenderChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>📊 花費／購買次數（性別）</h3>
+        <div class="chart-wrap"><canvas id="gadsTestGenderComboChart"></canvas></div>
+      </div>
+    </div>
+    <div class="table-card">
+      <div class="table-header"><h3>🚻 性別分析</h3></div>
+      <div class="table-wrap" id="gadsTestGenderTableWrap">${loadingPlaceholder()}</div>
     </div>`;
 }
 
@@ -1037,15 +1087,110 @@ async function fetchGadsTestData(force = false) {
   const until = document.getElementById('dateTo').value;
   renderGadsTestSkeleton();
 
-  const url = `${API_BASE}/api/google_ads_direct?since=${since}&until=${until}`;
-  const json = await cachedFetchJson(url, force);
-  lastGadsTestRaw = json.data || [];
+  const base = `${API_BASE}/api/google_ads_direct?since=${since}&until=${until}`;
+  const campP  = cachedFetchJson(`${base}&report=campaign`, force);
+  const headP  = cachedFetchJson(`${base}&report=headline`, force);
+  const descP  = cachedFetchJson(`${base}&report=description`, force);
+  const ageP   = cachedFetchJson(`${base}&report=age`, force);
+  const genderP = cachedFetchJson(`${base}&report=gender`, force);
 
+  headP.then(j => { lastGadsTestHeadlineRaw = j.data || []; populateGadsTestCampFilter('headline'); renderGadsTestAssetTable('headline'); })
+       .catch(e => showSectionError('gadsTestHeadlineWrap', e));
+  descP.then(j => { lastGadsTestDescriptionRaw = j.data || []; populateGadsTestCampFilter('description'); renderGadsTestAssetTable('description'); })
+       .catch(e => showSectionError('gadsTestDescriptionWrap', e));
+  ageP.then(j => renderGadsTestDemographic('Age', j.data || [])).catch(e => showSectionError('gadsTestAgeTableWrap', e));
+  genderP.then(j => renderGadsTestDemographic('Gender', j.data || [])).catch(e => showSectionError('gadsTestGenderTableWrap', e));
+
+  const json = await campP;
+  lastGadsTestRaw = json.data || [];
   const agg = aggregateGoogleRows(lastGadsTestRaw);
   renderGadsTestSummary(agg, since, until);
   renderGadsTestCampaignPie(agg);
   renderGoogleTable('gadsTestCampaignWrap', '廣告活動', agg);
   renderGadsTestDateTable();
+}
+
+function populateGadsTestCampFilter(kind) {
+  const rows = kind === 'headline' ? lastGadsTestHeadlineRaw : lastGadsTestDescriptionRaw;
+  const sel = document.getElementById(`gadsTest${kind === 'headline' ? 'Headline' : 'Description'}CampFilter`);
+  if (!sel) return;
+  const camps = [...new Set(rows.map(r => r.campaign_name).filter(Boolean))].sort();
+  sel.innerHTML = `<option value="">所有廣告活動</option>` + camps.map(c => `<option value="${c}">${c}</option>`).join('');
+}
+
+function renderGadsTestAssetTable(kind) {
+  const isHeadline = kind === 'headline';
+  const raw = isHeadline ? lastGadsTestHeadlineRaw : lastGadsTestDescriptionRaw;
+  const filterSel = document.getElementById(`gadsTest${isHeadline ? 'Headline' : 'Description'}CampFilter`);
+  const campFilter = filterSel ? filterSel.value : '';
+  const filtered = campFilter ? raw.filter(r => r.campaign_name === campFilter) : raw;
+  const agg = aggregateGoogleRows(filtered).slice(0, 10);
+  renderGoogleTable(isHeadline ? 'gadsTestHeadlineWrap' : 'gadsTestDescriptionWrap', isHeadline ? '標題' : '文案', agg);
+}
+
+function renderGadsTestDemographic(kind, rows) {
+  const isAge = kind === 'Age';
+  const order = isAge ? GOOGLE_AGE_ORDER : GOOGLE_GENDER_ORDER;
+  const agg = aggregateGoogleRows(rows); // collapse the per-day rows into one row per bucket
+  const orderedAgg = [...agg].sort((a,b) => {
+    const ai = order.indexOf(a.name), bi = order.indexOf(b.name);
+    return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
+  });
+  const total = orderedAgg.reduce((s,r)=>s+(r.spend||0), 0);
+  const maxSpend = Math.max(...orderedAgg.map(r=>r.spend||0), 1);
+
+  const wrap = document.getElementById(`gadsTest${kind}TableWrap`);
+  wrap.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>${isAge ? '年齡' : '性別'}</th><th>花費</th><th>佔比</th><th>曝光</th><th>點擊</th><th>CTR</th><th>CPC</th><th>購買<br>次數</th><th>CPA</th>
+      </tr></thead>
+      <tbody>${orderedAgg.map(r => {
+        const pct = total > 0 ? (r.spend/total*100).toFixed(1) : '0';
+        const bw = Math.round((r.spend||0)/maxSpend*80);
+        return `<tr>
+          <td><span class="cell-name">${r.name}</span></td>
+          <td>${fmtM(r.spend)}</td>
+          <td><div class="spend-bar-wrap"><span style="font-size:11px;color:#888">${pct}%</span><div class="spend-bar" style="width:${bw}px"></div></div></td>
+          <td>${fmtN(r.impressions)}</td>
+          <td>${fmtN(r.clicks)}</td>
+          <td>${fmtP(r.ctr)}</td>
+          <td>${fmtM(r.cpc)}</td>
+          <td>${fmtN(r.conversions)}</td>
+          <td>${fmtM(r.cpa)}</td>
+        </tr>`;
+      }).join('')}
+      </tbody>
+    </table>`;
+
+  const PIE_COLORS = ['#1677ff','#fa8c16','#52c41a','#eb2f96','#722ed1','#13c2c2','#fadb14'];
+  const labels = orderedAgg.map(r => r.name);
+
+  if (isAge) { if (gadsTestAgeChart) gadsTestAgeChart.destroy(); if (gadsTestAgeComboChart) gadsTestAgeComboChart.destroy(); }
+  else       { if (gadsTestGenderChart) gadsTestGenderChart.destroy(); if (gadsTestGenderComboChart) gadsTestGenderComboChart.destroy(); }
+
+  const doughnut = new Chart(document.getElementById(`gadsTest${kind}Chart`), {
+    type: 'doughnut',
+    data: { labels, datasets: [{ data: orderedAgg.map(r=>r.spend||0), backgroundColor: PIE_COLORS, borderWidth: 2, borderColor: 'white' }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 10, padding: 6 } } } }
+  });
+
+  const combo = new Chart(document.getElementById(`gadsTest${kind}ComboChart`), {
+    data: { labels, datasets: [
+      { type: 'bar',  label: '花費', data: orderedAgg.map(r=>r.spend||0),       backgroundColor: 'rgba(22,119,255,0.25)', borderColor: '#1677ff', borderWidth: 1, yAxisID: 'y', borderRadius: 3 },
+      { type: 'line', label: '購買次數', data: orderedAgg.map(r=>r.conversions||0), borderColor: '#fa8c16', borderWidth: 2, pointRadius: 3, tension: 0.3, yAxisID: 'y3' },
+    ]},
+    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { display: false } },
+      scales: {
+        x:  { grid: { display: false }, ticks: { font: { size: 10 } } },
+        y:  { position: 'left',  beginAtZero: true, grid: { color: '#f0f2f5' }, ticks: { callback: v=>'NT$'+Math.round(v/1000)+'K', font: { size: 10 } } },
+        y3: { position: 'right', beginAtZero: true, grid: { display: false }, ticks: { font: { size: 10 } } },
+      }
+    }
+  });
+
+  if (isAge) { gadsTestAgeChart = doughnut; gadsTestAgeComboChart = combo; }
+  else       { gadsTestGenderChart = doughnut; gadsTestGenderComboChart = combo; }
 }
 
 function renderGadsTestSummary(agg, since, until) {
