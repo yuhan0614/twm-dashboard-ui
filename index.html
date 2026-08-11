@@ -154,8 +154,6 @@ let lastTotal = null;
 let dateGranularity = 'day';
 let gadsTestTrendChart, gadsTestPieChart, gadsTestAgeChart, gadsTestAgeComboChart, gadsTestGenderChart, gadsTestGenderComboChart;
 let gadsTestDateGranularity = 'day';
-let gadsTestPieMode = 'spend'; // 'spend' | 'revenue' — toggled by the 活動佔比 chart's 花費/營收 buttons
-let lastGadsTestAgg = [];
 let lastGadsTestRaw = [];
 let lastGadsTestHeadlineRaw = [];
 let lastGadsTestDescriptionRaw = [];
@@ -793,13 +791,7 @@ function renderGadsTestSkeleton() {
         <div class="chart-wrap"><canvas id="gadsTestTrendChart"></canvas></div>
       </div>
       <div class="chart-card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-          <h3 style="margin-bottom:0;">📊 活動佔比</h3>
-          <div class="preset-btns">
-            <button class="preset-btn ${gadsTestPieMode==='spend'?'active':''}" onclick="setGadsTestPieMode('spend')">花費</button>
-            <button class="preset-btn ${gadsTestPieMode==='revenue'?'active':''}" onclick="setGadsTestPieMode('revenue')">營收</button>
-          </div>
-        </div>
+        <h3>📊 活動佔比</h3>
         <div class="chart-wrap"><canvas id="gadsTestPieChart"></canvas></div>
       </div>
     </div>
@@ -1007,25 +999,12 @@ function renderGadsTestSummary(agg, since, until, prevAgg = []) {
     <div class="sc"><div class="lbl">CPA</div><div class="val">${fmtM(cpa)}</div>${deltaHtml(cpa, prevCpa, true)}</div>`;
 }
 
-function setGadsTestPieMode(mode) {
-  gadsTestPieMode = mode;
-  document.querySelectorAll('#tab-gadsTest .preset-btns .preset-btn').forEach(b => {
-    if (b.textContent === '花費' || b.textContent === '營收') {
-      b.classList.toggle('active', (b.textContent === '花費' ? 'spend' : 'revenue') === mode);
-    }
-  });
-  renderGadsTestCampaignPie(lastGadsTestAgg);
-}
-
 function renderGadsTestCampaignPie(agg) {
-  lastGadsTestAgg = agg;
   if (gadsTestPieChart) gadsTestPieChart.destroy();
   const PIE_COLORS = ['#1677ff','#fa8c16','#52c41a','#eb2f96','#722ed1','#13c2c2','#fadb14','#f5222d'];
-  const pieField = gadsTestPieMode === 'revenue' ? 'revenue' : 'spend';
-  const sorted = [...agg].sort((a, b) => (b[pieField] || 0) - (a[pieField] || 0));
   gadsTestPieChart = new Chart(document.getElementById('gadsTestPieChart'), {
     type: 'doughnut',
-    data: { labels: sorted.map(r => r.name.slice(0,16)), datasets: [{ data: sorted.map(r => r[pieField] || 0), backgroundColor: PIE_COLORS, borderWidth: 2, borderColor: 'white' }] },
+    data: { labels: agg.map(r => r.name.slice(0,16)), datasets: [{ data: agg.map(r => r.spend || 0), backgroundColor: PIE_COLORS, borderWidth: 2, borderColor: 'white' }] },
     plugins: [PIE_PERCENT_LABELS],
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { font: { size: 10 }, boxWidth: 10, padding: 6 } }, tooltip: { callbacks: moneyDoughnutTooltipCallbacks() } } }
   });
