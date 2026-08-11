@@ -154,6 +154,8 @@ let lastTotal = null;
 let dateGranularity = 'day';
 let gadsTestTrendChart, gadsTestPieChart, gadsTestAgeChart, gadsTestAgeComboChart, gadsTestGenderChart, gadsTestGenderComboChart;
 let gadsTestDateGranularity = 'day';
+let gadsTestPieMode = 'spend'; // 'spend' | 'revenue' — toggled by the 活動佔比 chart's 花費/營收 buttons
+let lastGadsTestAgg = [];
 let lastGadsTestRaw = [];
 let lastGadsTestHeadlineRaw = [];
 let lastGadsTestDescriptionRaw = [];
@@ -653,12 +655,13 @@ function aggregateGoogleRows(rows) {
   const map = {};
   for (const r of rows) {
     const key = r.name || '—';
-    if (!map[key]) map[key] = { name: key, spend: 0, impressions: 0, clicks: 0, conversions: 0 };
+    if (!map[key]) map[key] = { name: key, spend: 0, impressions: 0, clicks: 0, conversions: 0, revenue: 0 };
     const g = map[key];
     g.spend       += r.spend       || 0;
     g.impressions += r.impressions || 0;
     g.clicks      += r.clicks      || 0;
     g.conversions += r.conversions || 0;
+    g.revenue     += r.revenue     || 0;
   }
   return Object.values(map)
     .map(g => ({
@@ -666,6 +669,7 @@ function aggregateGoogleRows(rows) {
       ctr: g.impressions > 0 ? g.clicks / g.impressions * 100 : 0,
       cpc: g.clicks > 0 ? g.spend / g.clicks : 0,
       cpa: g.conversions > 0 ? g.spend / g.conversions : 0,
+      roas: g.spend > 0 ? g.revenue / g.spend : 0,
     }))
     .sort((a, b) => (b.spend || 0) - (a.spend || 0));
 }
@@ -741,10 +745,20 @@ function renderGadsTestSkeleton() {
     <div class="charts-row">
       <div class="chart-card">
         <h3>📅 每日趨勢</h3>
+        <div style="display:flex;gap:16px;margin-bottom:8px;font-size:11px;">
+          <span><span style="display:inline-block;width:12px;height:3px;background:#1677ff;border-radius:2px;vertical-align:middle;margin-right:4px"></span>花費</span>
+          <span><span style="display:inline-block;width:12px;height:3px;background:#fa8c16;border-radius:2px;vertical-align:middle;margin-right:4px"></span>購買次數</span>
+        </div>
         <div class="chart-wrap"><canvas id="gadsTestTrendChart"></canvas></div>
       </div>
       <div class="chart-card">
-        <h3>📊 活動佔比</h3>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+          <h3 style="margin-bottom:0;">📊 活動佔比</h3>
+          <div class="preset-btns">
+            <button class="preset-btn ${gadsTestPieMode==='spend'?'active':''}" onclick="setGadsTestPieMode('spend')">花費</button>
+            <button class="preset-btn ${gadsTestPieMode==='revenue'?'active':''}" onclick="setGadsTestPieMode('revenue')">營收</button>
+          </div>
+        </div>
         <div class="chart-wrap"><canvas id="gadsTestPieChart"></canvas></div>
       </div>
     </div>
@@ -952,12 +966,25 @@ function renderGadsTestSummary(agg, since, until, prevAgg = []) {
     <div class="sc"><div class="lbl">CPA</div><div class="val">${fmtM(cpa)}</div>${deltaHtml(cpa, prevCpa, true)}</div>`;
 }
 
+function setGadsTestPieMode(mode) {
+  gadsTestPieMode = mode;
+  document.querySelectorAll('#tab-gadsTest .preset-btns .preset-btn').forEach(b => {
+    if (b.textContent === '花費' || b.textContent === '營收') {
+      b.classList.toggle('active', (b.textContent === '花費' ? 'spend' : 'revenue') === mode);
+    }
+  });
+  renderGadsTestCampaignPie(lastGadsTestAgg);
+}
+
 function renderGadsTestCampaignPie(agg) {
+  lastGadsTestAgg = agg;
   if (gadsTestPieChart) gadsTestPieChart.destroy();
   const PIE_COLORS = ['#1677ff','#fa8c16','#52c41a','#eb2f96','#722ed1','#13c2c2','#fadb14','#f5222d'];
+  const pieField = gadsTestPieMode === 'revenue' ? 'revenue' : 'spend';
+  const sorted = [...agg].sort((a, b) => (b[pieField] || 0) - (a[pieField] || 0));
   gadsTestPieChart = new Chart(document.getElementById('gadsTestPieChart'), {
     type: 'doughnut',
-    data: { labels: agg.map(r => r.name.slice(0,16)), datasets: [{ data: agg.map(r => r.spend), backgroundColor: PIE_COLORS, borderWidth: 2, borderColor: 'white' }] },
+    data: { labels: sorted.map(r => r.name.slice(0,16)), datasets: [{ data: sorted.map(r => r[pieField] || 0), backgroundColor: PIE_COLORS, borderWidth: 2, borderColor: 'white' }] },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { font: { size: 10 }, boxWidth: 10, padding: 6 } } } }
   });
 
