@@ -218,6 +218,46 @@ function deltaHtml(curr, prev, invert = false) {
   const sign = pct > 0 ? '+' : '';
   return `<div class="delta ${cls}">${sign}${pct.toFixed(1)}% <span style="font-weight:400;color:#bbb;">前期</span></div>`;
 }
+
+// Shared Chart.js tooltip formatter — rounds every value to a whole number (no decimals) and
+// prefixes NT$ for money-type series (spend/revenue/cost-per-x labels).
+function fmtTooltipValue(value, label) {
+  const n = Math.round(value || 0).toLocaleString('zh-TW');
+  const isMoney = /花費|營收|CPA|CPC|CPM|CPLC/.test(label || '');
+  return isMoney ? `NT$${n}` : n;
+}
+function comboTooltipCallbacks() {
+  return { label: (ctx) => `${ctx.dataset.label || ''}: ${fmtTooltipValue(ctx.parsed.y, ctx.dataset.label)}` };
+}
+function moneyDoughnutTooltipCallbacks() {
+  return { label: (ctx) => `${ctx.label || ''}: ${fmtTooltipValue(ctx.parsed, '花費')}` };
+}
+
+// Draws a white "%"-of-total label centered on each slice of a doughnut/pie chart.
+// Opted into per-chart via `plugins: [PIE_PERCENT_LABELS]` — not applied globally.
+const PIE_PERCENT_LABELS = {
+  id: 'piePercentLabels',
+  afterDatasetsDraw(chart) {
+    const meta = chart.getDatasetMeta(0);
+    const data = chart.data.datasets[0]?.data || [];
+    const total = data.reduce((s, v) => s + (v || 0), 0);
+    if (total <= 0 || !meta?.data?.length) return;
+    const { ctx } = chart;
+    ctx.save();
+    ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    meta.data.forEach((arc, i) => {
+      const pct = (data[i] || 0) / total * 100;
+      if (pct < 4) return; // too thin a slice to fit readable text
+      const pos = arc.tooltipPosition();
+      ctx.fillText(Math.round(pct) + '%', pos.x, pos.y);
+    });
+    ctx.restore();
+  }
+};
+
 function clearPreset() {
   document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
 }
@@ -439,11 +479,11 @@ function renderCore(camps, trend, since, until, prevCamps = []) {
       { type:'bar',  label:'花費', data: filteredTrend.map(r=>r.spend||0),    backgroundColor:'rgba(22,119,255,0.25)', borderColor:'#1677ff', borderWidth:1, yAxisID:'y', borderRadius:3 },
       { type:'line', label:'購買', data: filteredTrend.map(r=>r.purchase||0), borderColor:'#fa8c16', borderWidth:2, pointRadius:2, tension:0.3, yAxisID:'y3' },
     ]},
-    options: { responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false}, plugins:{legend:{display:false}},
+    options: { responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false}, plugins:{legend:{display:false}, tooltip:{callbacks:comboTooltipCallbacks()}},
       scales: {
         x:  { grid:{display:false}, ticks:{font:{size:10},maxTicksLimit:10} },
         y:  { position:'left',  beginAtZero:true, grid:{color:'#f0f2f5'}, ticks:{callback:v=>'NT$'+Math.round(v/1000)+'K',font:{size:10}} },
-        y3: { position:'right', beginAtZero:true, grid:{display:false}, ticks:{font:{size:10}} },
+        y3: { position:'right', beginAtZero:true, grid:{display:false}, ticks:{precision:0,font:{size:10}} },
       }
     }
   });
@@ -460,7 +500,8 @@ function renderAudience(adsets) {
   pieChart = new Chart(document.getElementById('pieChart'), {
     type: 'doughnut',
     data: { labels: adsetsSorted.map(r=>r.adset_name.slice(0,16)), datasets:[{data:adsetsSorted.map(r=>r.spend),backgroundColor:PIE_COLORS,borderWidth:2,borderColor:'white'}] },
-    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'right',labels:{font:{size:10},boxWidth:10,padding:6}}} }
+    plugins: [PIE_PERCENT_LABELS],
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'right',labels:{font:{size:10},boxWidth:10,padding:6}}, tooltip:{callbacks:moneyDoughnutTooltipCallbacks()}} }
   });
 }
 
@@ -630,7 +671,7 @@ function renderDemographic(kind, rows) {
   const doughnut = new Chart(document.getElementById(kind + 'Chart'), {
     type: 'doughnut',
     data: { labels, datasets: [{ data: sorted.map(r=>r.spend||0), backgroundColor: PIE_COLORS, borderWidth: 2, borderColor: 'white' }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 10, padding: 6 } } } }
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 10, padding: 6 } }, tooltip: { callbacks: moneyDoughnutTooltipCallbacks() } } }
   });
 
   const combo = new Chart(document.getElementById(kind + 'ComboChart'), {
@@ -638,11 +679,11 @@ function renderDemographic(kind, rows) {
       { type: 'bar',  label: '花費', data: sorted.map(r=>r.spend||0),    backgroundColor: 'rgba(22,119,255,0.25)', borderColor: '#1677ff', borderWidth: 1, yAxisID: 'y', borderRadius: 3 },
       { type: 'line', label: '購買', data: sorted.map(r=>r.purchase||0), borderColor: '#fa8c16', borderWidth: 2, pointRadius: 3, tension: 0.3, yAxisID: 'y3' },
     ]},
-    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { display: false } },
+    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { display: false }, tooltip: { callbacks: comboTooltipCallbacks() } },
       scales: {
         x:  { grid: { display: false }, ticks: { font: { size: 10 } } },
         y:  { position: 'left',  beginAtZero: true, grid: { color: '#f0f2f5' }, ticks: { callback: v=>'NT$'+Math.round(v/1000)+'K', font: { size: 10 } } },
-        y3: { position: 'right', beginAtZero: true, grid: { display: false }, ticks: { font: { size: 10 } } },
+        y3: { position: 'right', beginAtZero: true, grid: { display: false }, ticks: { precision: 0, font: { size: 10 } } },
       }
     }
   });
@@ -924,7 +965,7 @@ function renderGadsTestDemographic(kind, rows) {
   const doughnut = new Chart(document.getElementById(`gadsTest${kind}Chart`), {
     type: 'doughnut',
     data: { labels, datasets: [{ data: orderedAgg.map(r=>r.spend||0), backgroundColor: PIE_COLORS, borderWidth: 2, borderColor: 'white' }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 10, padding: 6 } } } }
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 10, padding: 6 } }, tooltip: { callbacks: moneyDoughnutTooltipCallbacks() } } }
   });
 
   const combo = new Chart(document.getElementById(`gadsTest${kind}ComboChart`), {
@@ -932,11 +973,11 @@ function renderGadsTestDemographic(kind, rows) {
       { type: 'bar',  label: '花費', data: orderedAgg.map(r=>r.spend||0),       backgroundColor: 'rgba(22,119,255,0.25)', borderColor: '#1677ff', borderWidth: 1, yAxisID: 'y', borderRadius: 3 },
       { type: 'line', label: '購買次數', data: orderedAgg.map(r=>r.conversions||0), borderColor: '#fa8c16', borderWidth: 2, pointRadius: 3, tension: 0.3, yAxisID: 'y3' },
     ]},
-    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { display: false } },
+    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { display: false }, tooltip: { callbacks: comboTooltipCallbacks() } },
       scales: {
         x:  { grid: { display: false }, ticks: { font: { size: 10 } } },
         y:  { position: 'left',  beginAtZero: true, grid: { color: '#f0f2f5' }, ticks: { callback: v=>'NT$'+Math.round(v/1000)+'K', font: { size: 10 } } },
-        y3: { position: 'right', beginAtZero: true, grid: { display: false }, ticks: { font: { size: 10 } } },
+        y3: { position: 'right', beginAtZero: true, grid: { display: false }, ticks: { precision: 0, font: { size: 10 } } },
       }
     }
   });
@@ -985,7 +1026,8 @@ function renderGadsTestCampaignPie(agg) {
   gadsTestPieChart = new Chart(document.getElementById('gadsTestPieChart'), {
     type: 'doughnut',
     data: { labels: sorted.map(r => r.name.slice(0,16)), datasets: [{ data: sorted.map(r => r[pieField] || 0), backgroundColor: PIE_COLORS, borderWidth: 2, borderColor: 'white' }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { font: { size: 10 }, boxWidth: 10, padding: 6 } } } }
+    plugins: [PIE_PERCENT_LABELS],
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { font: { size: 10 }, boxWidth: 10, padding: 6 } }, tooltip: { callbacks: moneyDoughnutTooltipCallbacks() } } }
   });
 
   if (gadsTestTrendChart) gadsTestTrendChart.destroy();
@@ -995,11 +1037,11 @@ function renderGadsTestCampaignPie(agg) {
       { type: 'bar',  label: '花費', data: daily.map(r => r.spend || 0), backgroundColor: 'rgba(22,119,255,0.25)', borderColor: '#1677ff', borderWidth: 1, yAxisID: 'y', borderRadius: 3 },
       { type: 'line', label: '購買次數', data: daily.map(r => r.conversions || 0), borderColor: '#fa8c16', borderWidth: 2, pointRadius: 2, tension: 0.3, yAxisID: 'y3' },
     ]},
-    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { display: false } },
+    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { display: false }, tooltip: { callbacks: comboTooltipCallbacks() } },
       scales: {
         x:  { grid: { display: false }, ticks: { font: { size: 10 }, maxTicksLimit: 10 } },
         y:  { position: 'left',  beginAtZero: true, grid: { color: '#f0f2f5' }, ticks: { callback: v=>'NT$'+Math.round(v/1000)+'K', font: { size: 10 } } },
-        y3: { position: 'right', beginAtZero: true, grid: { display: false }, ticks: { font: { size: 10 } } },
+        y3: { position: 'right', beginAtZero: true, grid: { display: false }, ticks: { precision: 0, font: { size: 10 } } },
       }
     }
   });
