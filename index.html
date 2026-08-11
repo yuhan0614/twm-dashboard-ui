@@ -103,8 +103,7 @@
 
 <div class="tabs">
   <button class="tab-btn active" onclick="switchTab('meta', this)">📊 Meta 成效</button>
-  <button class="tab-btn" onclick="switchTab('google', this)">🔍 Google Ads</button>
-  <button class="tab-btn" onclick="switchTab('gadsTest', this)">🧪 Google Ads（API 測試）</button>
+  <button class="tab-btn" onclick="switchTab('gadsTest', this)">🔍 Google Ads</button>
 </div>
 
 <div class="controls">
@@ -135,11 +134,6 @@
       <div style="text-align:center;padding:60px;color:#aaa;">點擊「更新資料」開始載入</div>
     </div>
   </div>
-  <div class="tab-panel" id="tab-google-panel">
-    <div id="tab-google">
-      <div style="text-align:center;padding:60px;color:#aaa;">點擊「更新資料」開始載入</div>
-    </div>
-  </div>
   <div class="tab-panel" id="tab-gadsTest-panel">
     <div id="tab-gadsTest">
       <div style="text-align:center;padding:60px;color:#aaa;">點擊「更新資料」開始載入</div>
@@ -154,17 +148,12 @@ let trendChart, pieChart, ageChart, ageComboChart, genderChart, genderComboChart
 let lastFilteredTrend = [];
 let lastTotal = null;
 let dateGranularity = 'day';
-let googleTrendChart, googlePieChart, googleAgeChart, googleAgeComboChart, googleGenderChart, googleGenderComboChart;
-let googleDateGranularity = 'day';
-let lastGoogleCampaignRaw = [];
-let lastGoogleHeadlineRaw = [];
-let lastGoogleDescriptionRaw = [];
 let gadsTestTrendChart, gadsTestPieChart, gadsTestAgeChart, gadsTestAgeComboChart, gadsTestGenderChart, gadsTestGenderComboChart;
 let gadsTestDateGranularity = 'day';
 let lastGadsTestRaw = [];
 let lastGadsTestHeadlineRaw = [];
 let lastGadsTestDescriptionRaw = [];
-const GOOGLE_AUTO_REFRESH_MS = 15 * 60 * 1000; // Google Ads 指令碼每小時跑一次，15分鐘輪詢一次確保拿到新資料
+const GOOGLE_AUTO_REFRESH_MS = 15 * 60 * 1000; // 15分鐘輪詢一次確保拿到新資料
 
 function switchTab(name, btn) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -179,7 +168,7 @@ async function refreshAll(force = false) {
   btn.disabled = true;
   status.textContent = '載入中…'; status.className = 'status-text';
   try {
-    await Promise.all([fetchData(force), fetchGoogleData(force), fetchGadsTestData(force)]);
+    await Promise.all([fetchData(force), fetchGadsTestData(force)]);
     status.textContent = '✓ 完成'; status.className = 'status-text ok';
   } catch(e) {
     status.textContent = `❌ ${e.message}`; status.className = 'status-text err';
@@ -224,7 +213,7 @@ function applyPresetMonth() {
   document.getElementById('dateTo').value = toYMD(to);
   document.getElementById('preset7').classList.add('active');
   refreshAll(false);
-  setInterval(() => fetchGoogleData(true), GOOGLE_AUTO_REFRESH_MS);
+  setInterval(() => fetchGadsTestData(true), GOOGLE_AUTO_REFRESH_MS);
 })();
 
 function cacheGet(key) {
@@ -621,124 +610,6 @@ function renderDemographic(kind, rows) {
   else       { genderChart = doughnut; genderComboChart = combo; }
 }
 
-function renderGoogleSkeleton() {
-  document.getElementById('tab-google').innerHTML = `
-    <div class="summary-grid" id="googleSummaryGrid">${loadingCards(6)}</div>
-    <div class="charts-row">
-      <div class="chart-card">
-        <h3>📅 每日趨勢</h3>
-        <div style="display:flex;gap:16px;margin-bottom:8px;font-size:11px;">
-          <span><span style="display:inline-block;width:12px;height:3px;background:#1677ff;border-radius:2px;vertical-align:middle;margin-right:4px"></span>花費</span>
-          <span><span style="display:inline-block;width:12px;height:3px;background:#fa8c16;border-radius:2px;vertical-align:middle;margin-right:4px"></span>購買次數</span>
-        </div>
-        <div class="chart-wrap"><canvas id="googleTrendChart"></canvas></div>
-      </div>
-      <div class="chart-card">
-        <h3>📊 活動佔比</h3>
-        <div class="chart-wrap"><canvas id="googlePieChart"></canvas></div>
-      </div>
-    </div>
-    <div class="table-card">
-      <div class="table-header">
-        <h3>📅 每日成效</h3>
-        <div class="table-header-right">
-          <div class="preset-btns">
-            <button class="preset-btn ${googleDateGranularity==='day'?'active':''}" onclick="setGoogleGranularity('day')">日</button>
-            <button class="preset-btn ${googleDateGranularity==='week'?'active':''}" onclick="setGoogleGranularity('week')">週</button>
-            <button class="preset-btn ${googleDateGranularity==='month'?'active':''}" onclick="setGoogleGranularity('month')">月</button>
-          </div>
-        </div>
-      </div>
-      <div class="table-wrap" id="googleDateTableWrap">${loadingPlaceholder()}</div>
-    </div>
-    <div class="table-card">
-      <div class="table-header"><h3>🎯 依廣告活動</h3></div>
-      <div class="table-wrap" id="googleCampaignWrap">${loadingPlaceholder()}</div>
-    </div>
-    <div class="table-card">
-      <div class="table-header">
-        <h3>📝 依標題</h3>
-        <div class="table-header-right">
-          <select class="filter-select" id="googleHeadlineCampFilter" onchange="renderGoogleAssetTable('headline')"><option value="">所有廣告活動</option></select>
-          <span style="font-size:12px;color:#aaa;">依花費顯示前 10 筆</span>
-        </div>
-      </div>
-      <div class="table-wrap" id="googleHeadlineWrap">${loadingPlaceholder()}</div>
-    </div>
-    <div class="table-card">
-      <div class="table-header">
-        <h3>💬 依文案</h3>
-        <div class="table-header-right">
-          <select class="filter-select" id="googleDescriptionCampFilter" onchange="renderGoogleAssetTable('description')"><option value="">所有廣告活動</option></select>
-          <span style="font-size:12px;color:#aaa;">依花費顯示前 10 筆</span>
-        </div>
-      </div>
-      <div class="table-wrap" id="googleDescriptionWrap">${loadingPlaceholder()}</div>
-    </div>
-    <div class="charts-row charts-row-rev">
-      <div class="chart-card">
-        <h3>🎂 花費分佈（年齡）</h3>
-        <div class="chart-wrap"><canvas id="googleAgeChart"></canvas></div>
-      </div>
-      <div class="chart-card">
-        <h3>📊 花費／購買次數（年齡）</h3>
-        <div class="chart-wrap"><canvas id="googleAgeComboChart"></canvas></div>
-      </div>
-    </div>
-    <div class="table-card">
-      <div class="table-header"><h3>🎂 年齡分析</h3></div>
-      <div class="table-wrap" id="googleAgeTableWrap">${loadingPlaceholder()}</div>
-    </div>
-    <div class="charts-row charts-row-rev">
-      <div class="chart-card">
-        <h3>🚻 花費分佈（性別）</h3>
-        <div class="chart-wrap"><canvas id="googleGenderChart"></canvas></div>
-      </div>
-      <div class="chart-card">
-        <h3>📊 花費／購買次數（性別）</h3>
-        <div class="chart-wrap"><canvas id="googleGenderComboChart"></canvas></div>
-      </div>
-    </div>
-    <div class="table-card">
-      <div class="table-header"><h3>🚻 性別分析</h3></div>
-      <div class="table-wrap" id="googleGenderTableWrap">${loadingPlaceholder()}</div>
-    </div>`;
-}
-
-function filterGoogleByRange(rows) {
-  const since = document.getElementById('dateFrom').value;
-  const until = document.getElementById('dateTo').value;
-  return rows.filter(r => !r.date_start || (r.date_start >= since && r.date_start <= until));
-}
-
-async function fetchGoogleData(force = false) {
-  renderGoogleSkeleton();
-
-  const base = `${API_BASE}/api/google_insights`;
-  const campP  = cachedFetchJson(`${base}?report=campaign`, force);
-  const headP  = cachedFetchJson(`${base}?report=headline`, force);
-  const descP  = cachedFetchJson(`${base}?report=description`, force);
-  const ageP   = cachedFetchJson(`${base}?report=age`, force);
-  const genderP = cachedFetchJson(`${base}?report=gender`, force);
-
-  headP.then(j => { lastGoogleHeadlineRaw = j.data || []; populateGoogleCampFilter('headline'); renderGoogleAssetTable('headline'); })
-       .catch(e => showSectionError('googleHeadlineWrap', e));
-  descP.then(j => { lastGoogleDescriptionRaw = j.data || []; populateGoogleCampFilter('description'); renderGoogleAssetTable('description'); })
-       .catch(e => showSectionError('googleDescriptionWrap', e));
-  // Age/gender sheets only hold whole-window totals (no per-day breakdown), so they
-  // aren't affected by the shared date filter.
-  ageP.then(j => renderGoogleDemographic('Age', j.data || [])).catch(e => showSectionError('googleAgeTableWrap', e));
-  genderP.then(j => renderGoogleDemographic('Gender', j.data || [])).catch(e => showSectionError('googleGenderTableWrap', e));
-
-  const campJson = await campP;
-  lastGoogleCampaignRaw = campJson.data || [];
-  const agg = aggregateGoogleRows(filterGoogleByRange(lastGoogleCampaignRaw));
-  renderGoogleSummary(agg);
-  renderGoogleCampaignPie(agg);
-  renderGoogleTable('googleCampaignWrap', '廣告活動', agg);
-  renderGoogleDateTable();
-}
-
 function aggregateGoogleRows(rows) {
   const map = {};
   for (const r of rows) {
@@ -800,116 +671,6 @@ function finalizeGooglePeriod(g) {
   };
 }
 
-function setGoogleGranularity(g) {
-  googleDateGranularity = g;
-  document.querySelectorAll('#tab-google .table-header-right .preset-btn').forEach(b => b.classList.remove('active'));
-  event.target.classList.add('active');
-  renderGoogleDateTable();
-}
-
-function renderGoogleDateTable() {
-  const wrap = document.getElementById('googleDateTableWrap');
-  if (!wrap) return;
-  const periods = aggregateGoogleByPeriod(filterGoogleByRange(lastGoogleCampaignRaw), googleDateGranularity);
-  const total = finalizeGooglePeriod(periods.reduce((a, r) => ({
-    spend: a.spend + (r.spend||0), impressions: a.impressions + (r.impressions||0),
-    clicks: a.clicks + (r.clicks||0), conversions: a.conversions + (r.conversions||0),
-  }), { spend:0, impressions:0, clicks:0, conversions:0 }));
-
-  wrap.innerHTML = `
-    <table>
-      <thead><tr>
-        <th>日期</th><th>花費</th><th>曝光</th><th>點擊</th><th>CTR</th><th>CPC</th><th>購買<br>次數</th><th>CPA</th>
-      </tr></thead>
-      <tbody>${periods.map(r => `<tr>
-        <td><span class="cell-name">${r.label}</span></td>
-        <td>${fmtM(r.spend)}</td>
-        <td>${fmtN(r.impressions)}</td>
-        <td>${fmtN(r.clicks)}</td>
-        <td>${fmtP(r.ctr)}</td>
-        <td>${fmtM(r.cpc)}</td>
-        <td>${fmtN(r.conversions)}</td>
-        <td>${fmtM(r.cpa)}</td>
-      </tr>`).join('')}
-      <tr style="background:#f0f4ff;font-weight:700;border-top:2px solid #d0d9f0;">
-        <td>合計</td>
-        <td>${fmtM(total.spend)}</td>
-        <td>${fmtN(total.impressions)}</td>
-        <td>${fmtN(total.clicks)}</td>
-        <td>${fmtP(total.ctr)}</td>
-        <td>${fmtM(total.cpc)}</td>
-        <td>${fmtN(total.conversions)}</td>
-        <td>${fmtM(total.cpa)}</td>
-      </tr>
-      </tbody>
-    </table>`;
-}
-
-function renderGoogleSummary(agg) {
-  const total = agg.reduce((a, r) => ({
-    spend: a.spend + (r.spend || 0), impressions: a.impressions + (r.impressions || 0),
-    clicks: a.clicks + (r.clicks || 0), conversions: a.conversions + (r.conversions || 0),
-  }), { spend: 0, impressions: 0, clicks: 0, conversions: 0 });
-  const ctr = total.impressions > 0 ? total.clicks / total.impressions * 100 : 0;
-  const cpc = total.clicks > 0 ? total.spend / total.clicks : 0;
-  const cpa = total.conversions > 0 ? total.spend / total.conversions : 0;
-
-  const since = document.getElementById('dateFrom').value;
-  const until = document.getElementById('dateTo').value;
-  document.getElementById('googleSummaryGrid').innerHTML = `
-    <div class="sc c-blue"><div class="lbl">花費</div><div class="val">${fmtM(total.spend)}</div><div class="sub">${since} ～ ${until}</div></div>
-    <div class="sc"><div class="lbl">曝光</div><div class="val">${fmtN(total.impressions)}</div></div>
-    <div class="sc c-purple"><div class="lbl">點擊</div><div class="val">${fmtN(total.clicks)}</div><div class="sub">CTR ${fmtP(ctr)}</div></div>
-    <div class="sc"><div class="lbl">CPC</div><div class="val">${fmtM(cpc)}</div></div>
-    <div class="sc c-teal"><div class="lbl">購買次數</div><div class="val">${fmtN(total.conversions)}</div></div>
-    <div class="sc"><div class="lbl">CPA</div><div class="val">${fmtM(cpa)}</div></div>`;
-}
-
-function renderGoogleCampaignPie(agg) {
-  if (googlePieChart) googlePieChart.destroy();
-  const PIE_COLORS = ['#1677ff','#fa8c16','#52c41a','#eb2f96','#722ed1','#13c2c2','#fadb14','#f5222d'];
-  googlePieChart = new Chart(document.getElementById('googlePieChart'), {
-    type: 'doughnut',
-    data: { labels: agg.map(r => r.name.slice(0,16)), datasets: [{ data: agg.map(r => r.spend), backgroundColor: PIE_COLORS, borderWidth: 2, borderColor: 'white' }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { font: { size: 10 }, boxWidth: 10, padding: 6 } } } }
-  });
-
-  if (googleTrendChart) googleTrendChart.destroy();
-  const daily = aggregateGoogleByPeriod(filterGoogleByRange(lastGoogleCampaignRaw), 'day');
-  googleTrendChart = new Chart(document.getElementById('googleTrendChart'), {
-    data: { labels: daily.map(r => r.date_start), datasets: [
-      { type: 'bar',  label: '花費', data: daily.map(r => r.spend || 0), backgroundColor: 'rgba(22,119,255,0.25)', borderColor: '#1677ff', borderWidth: 1, yAxisID: 'y', borderRadius: 3 },
-      { type: 'line', label: '購買次數', data: daily.map(r => r.conversions || 0), borderColor: '#fa8c16', borderWidth: 2, pointRadius: 2, tension: 0.3, yAxisID: 'y3' },
-    ]},
-    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { display: false } },
-      scales: {
-        x:  { grid: { display: false }, ticks: { font: { size: 10 }, maxTicksLimit: 10 } },
-        y:  { position: 'left',  beginAtZero: true, grid: { color: '#f0f2f5' }, ticks: { callback: v=>'NT$'+Math.round(v/1000)+'K', font: { size: 10 } } },
-        y3: { position: 'right', beginAtZero: true, grid: { display: false }, ticks: { font: { size: 10 } } },
-      }
-    }
-  });
-}
-
-function populateGoogleCampFilter(kind) {
-  const rows = kind === 'headline' ? lastGoogleHeadlineRaw : lastGoogleDescriptionRaw;
-  const sel = document.getElementById(`google${kind === 'headline' ? 'Headline' : 'Description'}CampFilter`);
-  if (!sel) return;
-  const camps = [...new Set(rows.map(r => r.campaign_name).filter(Boolean))].sort();
-  sel.innerHTML = `<option value="">所有廣告活動</option>` + camps.map(c => `<option value="${c}">${c}</option>`).join('');
-}
-
-function renderGoogleAssetTable(kind) {
-  const isHeadline = kind === 'headline';
-  const raw = isHeadline ? lastGoogleHeadlineRaw : lastGoogleDescriptionRaw;
-  const filterSel = document.getElementById(`google${isHeadline ? 'Headline' : 'Description'}CampFilter`);
-  const campFilter = filterSel ? filterSel.value : '';
-  let filtered = filterGoogleByRange(raw);
-  if (campFilter) filtered = filtered.filter(r => r.campaign_name === campFilter);
-  const agg = aggregateGoogleRows(filtered).slice(0, 10);
-  renderGoogleTable(isHeadline ? 'googleHeadlineWrap' : 'googleDescriptionWrap', isHeadline ? '標題' : '文案', agg);
-}
-
 function renderGoogleTable(wrapId, nameLabel, rows) {
   const wrap = document.getElementById(wrapId);
   if (!wrap) return;
@@ -935,73 +696,6 @@ function renderGoogleTable(wrapId, nameLabel, rows) {
 const GOOGLE_AGE_ORDER = ['18-24','25-34','35-44','45-54','55-64','65+','不明'];
 const GOOGLE_GENDER_ORDER = ['男性','女性','不明'];
 
-function renderGoogleDemographic(kind, rows) {
-  const isAge = kind === 'Age';
-  const order = isAge ? GOOGLE_AGE_ORDER : GOOGLE_GENDER_ORDER;
-  const sorted = [...rows].sort((a,b) => {
-    const ai = order.indexOf(a.name), bi = order.indexOf(b.name);
-    return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
-  });
-  const total = sorted.reduce((s,r)=>s+(r.spend||0), 0);
-  const maxSpend = Math.max(...sorted.map(r=>r.spend||0), 1);
-
-  const wrap = document.getElementById(`google${kind}TableWrap`);
-  wrap.innerHTML = `
-    <table>
-      <thead><tr>
-        <th>${isAge ? '年齡' : '性別'}</th><th>花費</th><th>佔比</th><th>曝光</th><th>點擊</th><th>CTR</th><th>CPC</th><th>購買<br>次數</th><th>CPA</th>
-      </tr></thead>
-      <tbody>${sorted.map(r => {
-        const pct = total > 0 ? (r.spend/total*100).toFixed(1) : '0';
-        const bw = Math.round((r.spend||0)/maxSpend*80);
-        return `<tr>
-          <td><span class="cell-name">${r.name}</span></td>
-          <td>${fmtM(r.spend)}</td>
-          <td><div class="spend-bar-wrap"><span style="font-size:11px;color:#888">${pct}%</span><div class="spend-bar" style="width:${bw}px"></div></div></td>
-          <td>${fmtN(r.impressions)}</td>
-          <td>${fmtN(r.clicks)}</td>
-          <td>${fmtP(r.ctr)}</td>
-          <td>${fmtM(r.cpc)}</td>
-          <td>${fmtN(r.conversions)}</td>
-          <td>${fmtM(r.cpa)}</td>
-        </tr>`;
-      }).join('')}
-      </tbody>
-    </table>`;
-
-  const PIE_COLORS = ['#1677ff','#fa8c16','#52c41a','#eb2f96','#722ed1','#13c2c2','#fadb14'];
-  const labels = sorted.map(r => r.name);
-
-  if (isAge) { if (googleAgeChart) googleAgeChart.destroy(); if (googleAgeComboChart) googleAgeComboChart.destroy(); }
-  else       { if (googleGenderChart) googleGenderChart.destroy(); if (googleGenderComboChart) googleGenderComboChart.destroy(); }
-
-  const doughnut = new Chart(document.getElementById(`google${kind}Chart`), {
-    type: 'doughnut',
-    data: { labels, datasets: [{ data: sorted.map(r=>r.spend||0), backgroundColor: PIE_COLORS, borderWidth: 2, borderColor: 'white' }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 10, padding: 6 } } } }
-  });
-
-  const combo = new Chart(document.getElementById(`google${kind}ComboChart`), {
-    data: { labels, datasets: [
-      { type: 'bar',  label: '花費', data: sorted.map(r=>r.spend||0),       backgroundColor: 'rgba(22,119,255,0.25)', borderColor: '#1677ff', borderWidth: 1, yAxisID: 'y', borderRadius: 3 },
-      { type: 'line', label: '購買次數', data: sorted.map(r=>r.conversions||0), borderColor: '#fa8c16', borderWidth: 2, pointRadius: 3, tension: 0.3, yAxisID: 'y3' },
-    ]},
-    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { display: false } },
-      scales: {
-        x:  { grid: { display: false }, ticks: { font: { size: 10 } } },
-        y:  { position: 'left',  beginAtZero: true, grid: { color: '#f0f2f5' }, ticks: { callback: v=>'NT$'+Math.round(v/1000)+'K', font: { size: 10 } } },
-        y3: { position: 'right', beginAtZero: true, grid: { display: false }, ticks: { font: { size: 10 } } },
-      }
-    }
-  });
-
-  if (isAge) { googleAgeChart = doughnut; googleAgeComboChart = combo; }
-  else       { googleGenderChart = doughnut; googleGenderComboChart = combo; }
-}
-
-// ── Google Ads API 直連測試分頁 ──────────────────────────────
-// 跟上面 Sheet 版本並存比對，同一組日期範圍、同一套聚合/渲染邏輯（aggregateGoogleRows /
-// aggregateGoogleByPeriod / renderGoogleTable 直接沿用）。確認數字一致後移除 Sheet 那條路線。
 function renderGadsTestSkeleton() {
   document.getElementById('tab-gadsTest').innerHTML = `
     <div class="summary-grid" id="gadsTestSummaryGrid">${loadingCards(6)}</div>
